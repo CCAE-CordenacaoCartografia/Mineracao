@@ -1,0 +1,1176 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>MINERAÇÃO</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    :root {
+      --gap: 10px;
+      --shadow: 0 2px 6px rgba(0,0,0,0.25);
+      --z-search: 3000;
+      --z-layers: 2200;
+      --z-north: 2100;
+      --z-title: 2000;
+      --z-legend: 1600;
+      --z-coords: 1500;
+    }
+
+    * { font-family: Arial, sans-serif !important; box-sizing: border-box; }
+
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      overflow: hidden;
+    }
+
+    #map { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+
+    /* Título */
+    .map-title {
+      position: fixed; top: var(--gap); left: var(--gap);
+      background: rgba(255,255,255,0.9); padding: 6px 10px; border-radius: 6px;
+      font-size: 1rem; font-weight: bold; color: #333; box-shadow: var(--shadow);
+      z-index: var(--z-title); max-width: 45vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Coordenadas */
+    #coords {
+      position: fixed; left: var(--gap); bottom: calc(100px + var(--gap));
+      background: rgba(255,255,255,0.8); padding: 6px 8px; font-size: 13px; border-radius: 4px;
+      border: 1px solid rgba(204,204,204,0.6); z-index: var(--z-coords); box-shadow: var(--shadow);
+    }
+
+    /* Busca */
+    #searchContainer {
+      position: fixed; top: var(--gap); right: var(--gap); display: flex; align-items: center;
+      z-index: var(--z-search); width: 44px; height: 42px; overflow: hidden; background: white;
+      border-radius: 40px; border: 1px solid #ccc; box-shadow: var(--shadow);
+    }
+    #searchToggle { background: none; border: none; cursor: pointer; font-size: 1.15rem; padding: 0 10px; height: 42px; }
+    #searchMunicipio { flex: 1; border: none; outline: none; font-size: 1rem; padding: 0 10px; height: 42px; display: none; min-width: 0; }
+    #searchContainer.expanded { width: 300px; overflow: visible; }
+    #searchContainer.expanded #searchMunicipio { display: block; }
+
+    /* Remover contornos Leaflet / popup clean */
+    .leaflet-container .leaflet-interactive:focus,
+    .leaflet-container .leaflet-marker-icon:focus,
+    .leaflet-container .leaflet-popup-close-button:focus { outline: none !important; box-shadow: none !important; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { box-shadow: none !important; border: none !important; }
+
+    /* Dropdown da busca */
+    #listaMunicipios {
+      position: absolute; top: 100%; left: 0; width: 100%; max-height: 280px; overflow-y: auto;
+      background: white; border: 1px solid #ccc; border-top: none; border-radius: 0 0 12px 12px;
+      box-shadow: var(--shadow); display: none; font-size: 14px; z-index: var(--z-search);
+    }
+    #listaMunicipios div { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #eee; }
+    #listaMunicipios div:hover { background: #f2f2f2; }
+    #listaMunicipios div.highlighted { background: #007bff; color: #fff; }
+
+    /* Painel de camadas embrulhado */
+    #camadasWrapper {
+      position: fixed; top: 56px !important; right: var(--gap); left: auto;
+      z-index: var(--z-layers); background: white; border: 1px solid #ccc; border-radius: 6px;
+      overflow: hidden; box-shadow: var(--shadow); max-width: min(92vw, 520px);
+    }
+    #camadasHeader { background: #007bff; color: #fff; padding: 6px 12px; font-weight: bold; font-size: 14px; cursor: pointer; user-select: none; }
+    .leaflet-control-layers { margin: 0 !important; padding: 6px !important; max-height: 50vh; overflow: auto; border: none !important; box-shadow: none !important; }
+    .leaflet-control-layers.collapsed-panel { display: none !important; }
+
+    /* Legenda Territórios */
+    .legend {
+      position: fixed; bottom:100px; left: 70%; transform: translateX(-50%);
+      background: white; line-height: 18px; color: #333; padding: 12px; font-size: 14px; border-radius: 6px;
+      max-width: min(92vw, 420px); max-height: 40vh; overflow-y: auto; box-shadow: var(--shadow);
+      transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease; z-index: var(--z-legend);
+    }
+    .legend-toggle {
+      position: fixed; bottom: calc(var(--gap) + 48px); left: 70%; transform: translateX(-50%);
+      display: block; background: #007bff; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 14px; cursor: pointer;
+      z-index: var(--z-legend); box-shadow: var(--shadow);
+    }
+    .legend.collapsed { max-height: 0 !important; padding: 0 !important; overflow: hidden; opacity: 0; }
+    .legend-toggle.attention { animation: pulseAttention 2.5s infinite ease-in-out; }
+    @keyframes pulseAttention { 0%{transform: translateX(-50%) scale(1); background:#007bff;} 50%{transform: translateX(-50%) scale(1.06); background:#0056b3;} 100%{transform: translateX(-50%) scale(1); background:#007bff;} }
+
+    /* Seta norte no topo direito */
+    .north-arrow {
+      pointer-events: none;
+      background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/Map_symbol_north_arrow.svg/64px-Map_symbol_north_arrow.svg.png');
+      background-size: contain; background-repeat: no-repeat; width: 40px; height: 40px; opacity: 0.85; margin: 0;
+    }
+    .leaflet-top.leaflet-right { top: 60px !important; right: var(--gap) !important; }
+
+    /* Upload */
+    #uploadBtn {
+      position: fixed; top: 45px; left: var(--gap); right: auto;
+      background: white; padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; z-index: var(--z-search); box-shadow: var(--shadow);
+    }
+    #uploadInput { display: none; }
+
+    /* Rosa dos ventos SBG */
+    .rosa-sbg { position: fixed; left: var(--gap); bottom: var(--gap); width: 140px; height: 140px; transform: scale(0.6); transform-origin: bottom left; pointer-events: none; z-index: 1400; }
+
+    /* Popup dimensões */
+    .leaflet-popup-content { max-width: 300px; max-height: 180px; overflow-y: auto; font-size: 13.5px; line-height: 1.3; }
+    .leaflet-popup-content-wrapper { padding: 8px; }
+    .leaflet-pane.leaflet-popup-pane { z-index: 5000 !important; }
+
+    .leaflet-top.leaflet-left { top: 66px; left: var(--gap); display: flex; flex-direction: column; gap: 8px; }
+
+    #creditosLegenda {
+      position: fixed; bottom: 18px; left: 70%; transform: translateX(-50%);
+      background: white; padding: 3px 3px; font-size:7px; border-radius: 3px;
+      box-shadow: 0 2px2px rgba(0,0,0,0.25); display:flex; align-items:center; justify-content:center; text-align:center; z-index: 2000; line-height: 1.4;
+    }
+
+    .my-location-dot{ width:14px; height:14px; background:#4285F4; border:2px solid #fff; border-radius:50%; box-shadow: 0 0 0 6px rgba(66,133,244,.25), 0 2px 6px rgba(0,0,0,.35); }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      #searchContainer { right: var(--gap); left: auto; transform: none; top: var(--gap); width: 44px; }
+      #searchContainer.expanded { width: min(92vw, 420px); }
+      #camadasWrapper { top: 100px; max-width: min(92vw, 520px); }
+      .leaflet-control-layers { max-height: 38vh; }
+      #coords { bottom: calc(100px + var(--gap)); font-size: 12px; }
+      .rosa-sbg { width: 120px; height: 120px; }
+    }
+
+
+    .legend-mineracao { z-index: var(--z-legend); }
+@media (max-width: 768px) {
+  .legend-mineracao { font-size: 13px; }
+}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="map-title">MINERAÇÃO</div>
+  <div id="coords">Lat: -, Lon: -<br>E: -, N: -<br>Fuso: -</div>
+
+  <button id="uploadBtn">Upload KML</button>
+  <input type="file" id="uploadInput" accept=".kml,.kmz,.xml" multiple />
+
+  <!-- Busca -->
+  <div id="searchContainer">
+    <button id="searchToggle">🔍</button>
+    <input type="text" id="searchMunicipio" placeholder="Pesquisar município" />
+    <div id="listaMunicipios"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <script src="https://unpkg.com/shp-write/shpwrite.js"></script>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-ajax/dist/leaflet.ajax.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tokml@0.4.0/tokml.js"></script>
+  <script src="https://unpkg.com/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
+
+  <script>
+    const map = L.map('map').setView([-7, -42], 7.48);
+
+    // Localização (sem zoom automático)
+    let geoMarker = null;
+    const myLocIcon = L.divIcon({ className: '', html: '<div class="my-location-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] });
+    function onLocationFound(e){
+      const latlng = e.latlng;
+      if (!geoMarker){ geoMarker = L.marker(latlng, { icon: myLocIcon, pane: 'markerPane', interactive:false }).addTo(map); }
+      else { geoMarker.setLatLng(latlng); }
+    }
+    function onLocationError(err){ console.warn('Erro localização:', err.message); }
+    map.on('locationfound', onLocationFound);
+    map.on('locationerror', onLocationError);
+    map.locate({ watch:true, setView:false, enableHighAccuracy:true, maxZoom:17 });
+
+    // Panes (sem energia e sem transmissão)
+    map.createPane('pane-mask');        map.getPane('pane-mask').style.zIndex = 200;
+    map.createPane('pane-base');        map.getPane('pane-base').style.zIndex = 300;
+    map.createPane('pane-piaui');       map.getPane('pane-piaui').style.zIndex = 360;
+    map.createPane('pane-biomas');      map.getPane('pane-biomas').style.zIndex = 370;
+    map.createPane('pane-territorios'); map.getPane('pane-territorios').style.zIndex = 410;
+    map.createPane('pane-municipios');  map.getPane('pane-municipios').style.zIndex = 420;
+    map.createPane('pane-imperial');    map.getPane('pane-imperial').style.zIndex = 500;
+    map.createPane('pane-litigio');     map.getPane('pane-litigio').style.zIndex = 550;
+    map.createPane('pane-upload');      map.getPane('pane-upload').style.zIndex = 6000;
+
+    // Panes Hidrografia
+    map.createPane('pane-hidros-rios');    map.getPane('pane-hidros-rios').style.zIndex = 575;
+    map.createPane('pane-hidros-massas');  map.getPane('pane-hidros-massas').style.zIndex = 574;
+    // Pane Mineração (acima da hidrografia)
+     map.createPane('pane-mineracao');
+    map.getPane('pane-mineracao').style.zIndex = 580;
+
+    // Popup autoPan ajustado
+    L.Popup.prototype.options.autoPan = true;
+    L.Popup.prototype.options.autoPanPaddingTopLeft = L.point(10, 90);
+    L.Popup.prototype.options.autoPanPaddingBottomRight = L.point(10, 40);
+
+    L.control.scale().addTo(map);
+
+    // Zoom e seta norte
+    map.zoomControl.remove();
+    L.control.zoom({ position: 'topleft' }).addTo(map);
+    const north = L.control({position: "topright"});
+    north.onAdd = ()=> L.DomUtil.create("div", "north-arrow");
+    north.addTo(map);
+
+    // Basemaps
+    const osmLayer    = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+    const esriSat     = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri' });
+    const esriTerrain = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri' });
+    const esriRoad    = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri' });
+
+    /* === Territórios: cores e popup === */
+    const territorioPalette = ['#1f78b4','#33a02c','#e31a1c','#ff7f00','#6a3d9a','#b15928','#a6cee3','#b2df8a','#fb9a99','#fdbf6f','#cab2d6','#ffff99'];
+    const territorioColors = []; let colorIndex = 0;
+    function getColorForTerritorio(nome, codigo = null) {
+      let terr = territorioColors.find(t => t.nome === nome);
+      if (!terr) {
+        const display = codigo ? `TD ${codigo} – ${nome}` : nome;
+        terr = { nome, codigo, label: display, cor: territorioPalette[colorIndex % territorioPalette.length] };
+        territorioColors.push(terr); colorIndex++;
+      }
+      return terr.cor;
+    }
+
+    function formatNumeroPTBR(n, d=2){return n.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});}
+    function generateInfoContent(p){
+      const labels = {
+        NM_MUN:"Município:",CD_MUN:"Código do Município:",fid:"Código do Território:",
+        NM_TD:"Território de Desenvolvimento:",AREA_KM2:"Área (km²):",
+        "Aglomerado - PI":"Aglomerado:",pib_porcent_Piaui:"PIB (%) Piauí:",pop_porcent_Piaui:"População (%) Piauí:",
+        pib_porcent_TD:"PIB (%) TD:",pop_porcent_TD:"População (%) TD:",
+        pib_2021:"PIB 2021:",pop_censo2022:"População (Censo 2022):",densidade_demografica:"Densidade demográfica:"
+      };
+      const grupos = {
+        geografico:["NM_MUN","CD_MUN","fid","NM_TD","Aglomerado - PI","AREA_KM2"],
+        populacional:["pop_censo2022","densidade_demografica","pop_porcent_Piaui","pop_porcent_TD"],
+        pib:["pib_2021","pib_porcent_Piaui","pib_porcent_TD"]
+      };
+      function formatValor(key,val){
+        if(val===null||val===undefined) return "-";
+        const num = Number(val);
+        if(!isNaN(num)){
+          if(["pib_porcent_Piaui","pop_porcent_Piaui","pib_porcent_TD","pop_porcent_TD"].includes(key)) return num.toFixed(2).replace('.',',')+"%";
+          if(key==="CD_MUN") return String(Math.trunc(num));
+          if(key==="pop_censo2022") return num.toLocaleString('pt-BR',{maximumFractionDigits:0});
+          if(key==="pib_2021") return formatNumeroPTBR(num * 1000, 2);
+          return formatNumeroPTBR(num,2);
+        }
+        return val;
+      }
+      function tabela(titulo,campos){
+        let h = `<div style="text-align:center;font-weight:bold;font-size:1.05em;margin:10px 0;">${titulo}</div><table style="border-collapse:collapse;width:100%;font-size:.95em;">`;
+        campos.forEach(k=>{
+          if(k in p){
+            h+=`<tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:normal;">${labels[k]||k}</th><td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${formatValor(k,p[k])}</td></tr>`;
+          }
+        });
+        return h+="</table>";
+      }
+      return tabela("Informações Geográficas",grupos.geografico)+tabela("Informações Populacionais",grupos.populacional)+tabela("Informações de PIB",grupos.pib);
+    }
+
+    function highlightFeature(e){ e.target.setStyle({ weight:4, color:'#ff6600', fillColor:'#ff6600', fillOpacity:0.5 }); e.target.bringToFront(); }
+    let municipioSelecionado = null;
+    function resetHighlight(e){ if (municipioSelecionado !== e.target) municipiosLayer.resetStyle(e.target); }
+
+    function onEachMunicipio(feature, layer){
+      const nome = feature.properties.NM_MUN || "Município";
+      layer.bindTooltip(`<b>${nome}</b><br><i>Clique para mais informações</i>`, { sticky:false, direction:'top', opacity:0.9 });
+      layer.on("popupopen", ()=>layer.closeTooltip());
+      layer.on({ mouseover: highlightFeature, mouseout: resetHighlight });
+      layer.on("click", ()=>{
+        if (municipioSelecionado && municipioSelecionado !== layer) municipiosLayer.resetStyle(municipioSelecionado);
+        municipioSelecionado = layer;
+        layer.setStyle({ weight:4, color:'#ff6600', fillColor:'#ff6600', fillOpacity:0.5 });
+      });
+
+      if (feature.properties) {
+        layer.bindPopup(
+          generateInfoContent(feature.properties)+
+          `<button class="download-btn" style="margin-top:5px;">Baixar KML deste município</button>`
+        );
+        layer.on('popupopen', (e)=>{
+          const popupEl = e.popup.getElement();
+          const btn = popupEl.querySelector('.download-btn');
+          if (btn) btn.addEventListener('click', ()=>{
+            const nomeArquivo = (feature.properties?.NM_MUN || "municipio")
+              .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ç/g,"c").replace(/Ç/g,"C")
+              .replace(/[^\w\s-]/g,"").replace(/\s+/g,"_");
+            let kml = tokml({ type:"FeatureCollection", features:[feature] });
+            const estiloKML = `
+              <Style id="customStyle">
+                <LineStyle><color>ff0000ff</color><width>2</width></LineStyle>
+                <PolyStyle><color>00ff0000</color><fill>1</fill><outline>1</outline></PolyStyle>
+              </Style>`;
+            kml = kml.replace("</Document>", `${estiloKML}</Document>`).replace(/<Placemark>/g,'<Placemark><styleUrl>#customStyle</styleUrl>');
+            const blob = new Blob([kml], { type:"application/vnd.google-earth.kml+xml" });
+            const url = URL.createObjectURL(blob); const a = document.createElement("a");
+            a.href = url; a.download = `${nomeArquivo}.kml`; a.click(); URL.revokeObjectURL(url);
+          });
+        });
+      }
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && municipioSelecionado) {
+        municipioSelecionado.closePopup();
+        municipiosLayer.resetStyle(municipioSelecionado);
+        municipioSelecionado = null;
+      }
+    });
+
+    // Territórios
+    function styleTerritorios(f){
+      const nome = f.properties.NM_TD || "Território";
+      const codigo = f.properties.fid || "";
+      const cor = getColorForTerritorio(nome,codigo);
+      return { color: cor, weight: 2, fillColor: cor, fillOpacity: 0.4 };
+    }
+    let territorioSelecionado = null;
+    function onEachTerritorio(feature, layer){
+      layer.on({
+        mouseover: highlightFeature,
+        mouseout: (e)=>territoriosLayer.resetStyle(e.target),
+        click: function (e) {
+          L.DomEvent.stop(e);
+          const territorioNome  = feature.properties?.NM_TD;
+          const territorioCodigo = feature.properties?.fid;
+
+          // Estatísticas agregadas se existirem
+          const tdKey   = String(territorioCodigo ?? territorioNome);
+          const tdStats = (typeof territoryStats !== 'undefined') ? territoryStats.get(tdKey) : null;
+
+          function fmt(n, d=2){ const v = Number(n); if (!Number.isFinite(v)) return '-'; return v.toLocaleString('pt-BR', { minimumFractionDigits:d, maximumFractionDigits:d }); }
+
+          let totaisHtml = '';
+          if (tdStats) {
+            const pibExibicao = tdStats.pib * 1000;
+            totaisHtml =
+              `<hr><b>Totais do Território</b>
+               <table style="border-collapse:collapse;width:100%;font-size:.95em;margin-top:6px;">
+                 <tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:normal;">População (Censo 2022)</th><td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${fmt(tdStats.pop,0)}</td></tr>
+                 <tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:normal;">PIB 2021 (R$)</th><td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${fmt(pibExibicao,2)}</td></tr>
+                 <tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:normal;">População (% do Piauí)</th><td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${fmt(tdStats.pop_pct_piaui,2)}%</td></tr>
+                 <tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:normal;">PIB (% do Piauí)</th><td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${fmt(tdStats.pib_pct_piaui,2)}%</td></tr>
+               </table>`;
+          }
+
+          // Lista de municípios do território
+          const municipios = [];
+          municipiosLayer.eachLayer(mLayer=>{
+            const p = mLayer.feature?.properties || {};
+            if ((p.NM_TD && territorioNome && p.NM_TD === territorioNome) ||
+                (p.fid && territorioCodigo && p.fid === territorioCodigo)) {
+              municipios.push(p.NM_MUN || "(sem nome)");
+            }
+          });
+          municipios.sort((a,b)=>a.localeCompare(b,'pt-BR'));
+
+          const baseHtml =
+            `<b>Território:</b> ${territorioNome || "-"}<br>`+
+            `<b>Código:</b> ${territorioCodigo || "-"}<br>`+
+            `<button class="download-btn" style="margin-top:5px;">Baixar KML deste território</button>` +
+            totaisHtml;
+
+          const listaHtml = municipios.length
+            ? `<hr><b>Municípios (${municipios.length}):</b>
+               <div style="max-height:150px;overflow:auto;margin-top:6px;">
+                 <ul style="margin:0;padding-left:18px;">${municipios.map(n=>`<li>${n}</li>`).join('')}</ul>
+               </div>`
+            : `<hr><i>Nenhum município associado encontrado.</i>`;
+
+          layer.bindPopup(baseHtml + listaHtml);
+
+          layer.once('popupopen', (ev)=>{
+            const popupEl = ev.popup.getElement();
+            const btn = popupEl.querySelector('.download-btn');
+            if (!btn) return;
+            btn.addEventListener('click', (ev2)=>{
+              ev2.stopPropagation();
+              if (typeof tokml !== 'function') { alert('Erro: biblioteca tokml não carregada.'); return; }
+              const nomeArquivo = (layer.feature.properties?.NM_TD || "territorio")
+                .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w\s-]/g,"").replace(/\s+/g,"_");
+              let kml = tokml({ type:"FeatureCollection", features:[layer.feature] });
+              const estiloKML = `
+                <Style id="customStyle">
+                  <LineStyle><color>ff00ffff</color><width>5</width></LineStyle>
+                  <PolyStyle><color>00ffffff</color><fill>1</fill><outline>1</outline></PolyStyle>
+                </Style>`;
+              kml = kml.replace("</Document>", `${estiloKML}</Document>`).replace(/<Placemark>/g,'<Placemark><styleUrl>#customStyle</styleUrl>');
+              const blob = new Blob([kml], { type:"application/vnd.google-earth.kml+xml" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = `${nomeArquivo}.kml`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+            });
+          });
+
+          layer.openPopup();
+        }
+      });
+    }
+
+    const territoriosLayer = new L.GeoJSON.AJAX("territorios.geojson", { pane: 'pane-territorios', style: styleTerritorios, onEachFeature: onEachTerritorio });
+
+    // Limpar seleção geral ao clicar fora
+    map.on("click", function (e) {
+      const t = e.originalEvent?.target;
+      if (t && (t.classList?.contains('leaflet-interactive') || t.closest?.('.leaflet-interactive'))) return;
+
+      territorioSelecionado = null;
+      territoriosLayer.eachLayer(layer => { territoriosLayer.resetStyle(layer); });
+
+      if (municipioSelecionado) { municipiosLayer.resetStyle(municipioSelecionado); municipioSelecionado = null; }
+      map.closePopup();
+
+      const legendDiv = document.querySelector('.legend');
+      const toggleBtn = document.querySelector('.legend-toggle');
+      if (legendDiv && toggleBtn && !legendDiv.classList.contains('collapsed')) {
+        legendDiv.classList.add('collapsed');
+        toggleBtn.textContent = 'Selecionar  territórios';
+        toggleBtn.classList.remove('attention');
+      }
+    });
+
+    // Fallback para legenda
+    setTimeout(() => { if (!document.querySelector('.legend-toggle')) addLegend(); }, 2000);
+
+    const municipiosLayer = new L.GeoJSON.AJAX("municipios.geojson", {
+      pane: 'pane-municipios',
+      style: ()=>({ color:'#000', weight:1.5, fillOpacity:0 }),
+      onEachFeature: onEachMunicipio
+    }).addTo(map);
+
+    // Agregações TD
+    const territoryStats = new Map();
+    const stateTotals = { pop: 0, pib: 0 };
+    function num(n){ const v = Number(n); return Number.isFinite(v) ? v : 0; }
+    municipiosLayer.on('data:loaded', () => {
+      territoryStats.clear(); stateTotals.pop = 0; stateTotals.pib = 0;
+      municipiosLayer.eachLayer(layer => {
+        const p = layer?.feature?.properties || {};
+        const nomeTD = p.NM_TD || '(sem território)';
+        const codTD  = p.fid ?? p.CD_TD ?? nomeTD;
+        const pop = num(p.pop_censo2022);
+        const pib = num(p.pib_2021);
+        stateTotals.pop += pop; stateTotals.pib += pib;
+        const key = String(codTD);
+        const cur = territoryStats.get(key) || { codigo: codTD, nome: nomeTD, pop: 0, pib: 0 };
+        cur.pop += pop; cur.pib += pib; territoryStats.set(key, cur);
+      });
+      for (const [key, td] of territoryStats.entries()) {
+        td.pop_pct_piaui = stateTotals.pop ? (td.pop / stateTotals.pop) * 100 : 0;
+        td.pib_pct_piaui = stateTotals.pib ? (td.pib / stateTotals.pib) * 100 : 0;
+        territoryStats.set(key, td);
+      }
+    });
+
+    /* === Litígio === */
+    function onEachLitigio(feature, layer){
+      layer.on({ mouseover: highlightFeature, mouseout: e=>litigioLayer.resetStyle(e.target) });
+      layer.bindPopup(`<b>Litígio</b><br><div style="margin-top:5px;"><button class="download-btn" data-format="kml">Baixar KML</button></div>`);
+      layer.on("popupopen", ()=>{
+        const btn = document.querySelector(".download-btn");
+        if (btn) btn.onclick = ()=>{
+          let kml = tokml({ type:"FeatureCollection", features:[feature] });
+          const estiloKML = `
+            <Style id="litigioStyle">
+              <LineStyle><color>ff00ff00</color><width>3</width></LineStyle>
+              <PolyStyle><color>00ffffff</color><fill>1</fill><outline>1</outline></PolyStyle>
+            </Style>`;
+          kml = kml.replace("</Document>", `${estiloKML}</Document>`).replace(/<Placemark>/g,'<Placemark><styleUrl>#litigioStyle</styleUrl>');
+          const blob = new Blob([kml], { type:"application/vnd.google-earth.kml+xml" });
+          const url = URL.createObjectURL(blob); const a = document.createElement("a");
+          a.href = url; a.download = "litigio.kml"; a.click(); URL.revokeObjectURL(url);
+        };
+      });
+    }
+    const litigioLayer = new L.GeoJSON.AJAX("litigio.geojson", { pane: 'pane-litigio', style:{ color:'red', weight:2 }, onEachFeature: onEachLitigio }).addTo(map);
+
+    /* === Linha Imperial === */
+    function onEachImperial(feature, layer){
+      layer.on({ mouseover: highlightFeature, mouseout: e=>linhaImperialLayer.resetStyle(e.target) });
+      layer.bindPopup(`<b>Linha Imperial</b><br><button class="download-btn" style="margin-top:5px;">Baixar KML</button>`);
+      layer.on("popupopen", ()=>{
+        const btn = document.querySelector(".download-btn");
+        if (btn) btn.onclick = ()=>{
+          let kml = tokml({ type:"FeatureCollection", features:[feature] });
+          const estiloKML = `
+            <Style id="imperialStyle">
+              <LineStyle><color>ff00a5ff</color><width>3</width></LineStyle>
+              <PolyStyle><color>00ffffff</color><fill>1</fill><outline>1</outline></PolyStyle>
+            </Style>`;
+          kml = kml.replace("</Document>", `${estiloKML}</Document>`).replace(/<Placemark>/g,'<Placemark><styleUrl>#imperialStyle</styleUrl>');
+          const blob = new Blob([kml], { type:"application/vnd.google-earth.kml+xml" });
+          const url = URL.createObjectURL(blob); const a = document.createElement("a");
+          a.href = url; a.download = "linha_imperial.kml"; a.click(); URL.revokeObjectURL(url);
+        };
+      });
+    }
+    const linhaImperialLayer = new L.GeoJSON.AJAX("linha_imperial.geojson", { pane: 'pane-imperial', style:{ color:'blue', weight:2, dashArray:'5,5' }, onEachFeature: onEachImperial }).addTo(map);
+
+    /* === Controle de camadas === */
+    const baseMaps = {
+      "OpenStreetMap": osmLayer,
+      "Esri Satélite": esriSat,
+      "Esri Terrain": esriTerrain,
+      "Esri Road": esriRoad
+    };
+    const overlayMaps = {
+      "Territórios": territoriosLayer,
+      "Municípios": municipiosLayer,
+      "Litígio": litigioLayer,
+      "Linha Imperial": linhaImperialLayer
+    };
+    const layersControl = L.control.layers(baseMaps, overlayMaps, { collapsed:false, position:'topleft' }).addTo(map);
+
+    // HIDROGRAFIA
+    const COLOR_RIO  = '#00A8F6';
+    function nomeHidrografia(props = {}, fallback = 'Hidrografia'){
+      const key = ['NOME','Nome','name','Rio','RIO','Curso','Hidrografia','Corpo','Corpo_dagua','Corpo_Dagua']
+        .find(k => Object.keys(props).some(p => p.toLowerCase() === k.toLowerCase()));
+      return key ? props[key] : fallback;
+    }
+
+    // Rios (linhas)
+    function styleRios(feature){ return { color: COLOR_RIO, weight: 2.8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }; }
+    function hoverRio(e){ const l=e.target; l.setStyle({ color:'#01579B', weight:6, opacity:1 }); try{ l.bringToFront(); }catch(_){} }
+    function resetHoverRio(e){ const l=e.target; l.setStyle(l.options._baseStyle || {}); }
+
+    function styleMassas(feature){ return { color:'#0D47A1', weight:1.8, opacity:0.95, fillColor:'#1565C0', fillOpacity:0.40 }; }
+    function hoverMassa(e){ const l=e.target; l.setStyle({ color:'#0B3D91', weight:3.2, opacity:1, fillOpacity:0.70 }); try{ l.bringToFront(); }catch(_){} }
+    function resetHoverMassa(e){ const l=e.target; l.setStyle(l.options._baseStyle || {}); }
+
+    function hydroPopup(feature, layer, tipo){
+      const p = feature.properties || {};
+      const nome = p.NORIOCOMP || (tipo === 'rio' ? 'Rio sem nome' : "Massa d'água");
+      const codigo = p.CORIO || '';
+      const titulo = (tipo === 'rio') ? 'Rio' : "Massa d'água";
+
+      let linhas = '';
+      if (p.NORIOCOMP !== undefined) {
+        linhas += `<tr><th style="text-align:left;padding:4px;border-bottom:1px solid #eee;font-weight:bold;">Nome do Rio</th><td style="text-align:right;padding:4px;border-bottom:1px solid #eee;">${nome}</td></tr>`;
+      }
+      if (p.CORIO !== undefined) {
+        linhas += `<tr><th style="text-align:left;padding:4px;border-bottom:1px solid #eee;font-weight:bold;">Código</th><td style="text-align:right;padding:4px;border-bottom:1px solid #eee;">${codigo}</td></tr>`;
+      }
+      Object.keys(p).sort().forEach(k => {
+        if (k.toUpperCase() === 'NORIOCOMP' || k.toUpperCase() === 'CORIO') return;
+        linhas += `<tr><th style="text-align:left;padding:4px;border-bottom:1px solid #eee;font-weight:normal;">${k}</th><td style="text-align:right;padding:4px;border-bottom:1px solid #eee;">${(p[k] ?? '').toString()}</td></tr>`;
+      });
+
+      const html = `
+        <div style="font-weight:bold;margin-bottom:6px;">${titulo}</div>
+        <table style="border-collapse:collapse;width:100%;font-size:.95em;">${linhas || '<tr><td>(Sem atributos)</td></tr>'}</table>
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+          <button class="hidro-kml-btn" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">Baixar KML</button>
+        </div>`;
+      layer.bindPopup(html);
+
+      layer.on('popupopen', (e)=>{
+        const el = e.popup.getElement();
+        const btn = el.querySelector('.hidro-kml-btn');
+        if (!btn) return;
+        btn.addEventListener('click', ()=>{
+          const nomeArq = String(nome).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w\s-]/g,'').replace(/\s+/g,'_') || (tipo==='rio' ? 'rio' : 'massa_dagua');
+          let kml = tokml({ type:'FeatureCollection', features:[feature] });
+          const estiloKML = (tipo === 'rio')
+            ? `<Style id="rioStyle"><LineStyle><color>fff7c34f</color><width>4</width></LineStyle></Style>`
+            : `<Style id="massaStyle"><LineStyle><color>ff1047a1</color><width>2</width></LineStyle><PolyStyle><color>801565c0</color><fill>1</fill><outline>1</outline></PolyStyle></Style>`;
+          kml = kml.replace('</Document>', `${estiloKML}</Document>`)
+                   .replace(/<Placemark>/g, `<Placemark><styleUrl>#${tipo==='rio' ? 'rioStyle' : 'massaStyle'}</styleUrl>`);
+          const blob = new Blob([kml], { type:'application/vnd.google-earth.kml+xml' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = `${nomeArq}.kml`;
+          document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        });
+      });
+    }
+
+    // Camadas Hidrografia
+    const riosLayer = new L.GeoJSON.AJAX("Rios_.geojson", {
+      pane: 'pane-hidros-rios',
+      style: (f)=>{ const s = styleRios(f); return s; },
+      onEachFeature: (feature, layer)=>{
+        layer.options._baseStyle = styleRios(feature);
+        hydroPopup(feature, layer, 'rio');
+        layer.on({ mouseover: hoverRio, mouseout: resetHoverRio });
+        try {
+          const nome = nomeHidrografia(feature.properties || {}, 'Rio');
+          layer.bindTooltip(nome, { direction:'top', opacity:0.9, sticky:false });
+        } catch(_){}
+      }
+    })
+    const massasAguaLayer = new L.GeoJSON.AJAX("Massas_Dagua.geojson", {
+      pane: 'pane-hidros-massas',
+      style: (f)=>{ const s = styleMassas(f); return s; },
+      onEachFeature: (feature, layer)=>{
+        layer.options._baseStyle = styleMassas(feature);
+        hydroPopup(feature, layer, 'massa');
+        layer.on({ mouseover: hoverMassa, mouseout: resetHoverMassa });
+        try {
+          const nome = nomeHidrografia(feature.properties || {}, "Massa d'água");
+          layer.bindTooltip(nome, { direction:'top', opacity:0.9, sticky:false });
+        } catch(_){}
+      }
+    })
+
+   // Camada Mineração (arquivo no mesmo diretório: Mineração_PI.geojson)
+const mineracaoLayer = new L.GeoJSON.AJAX("Mineração_PI.geojson", {
+  pane: 'pane-mineracao',
+  pointToLayer: (feature, latlng) => {
+    const st = styleMinerPoint(feature);
+    const mk = L.circleMarker(latlng, st);
+    mk.options._baseStyle = st; // reset no hoverLeave
+    return mk;
+  },
+  style: (feature) => { // para polígonos/linhas, se houver
+    const st = styleMinerPoly(feature);
+    return st;
+  },
+  onEachFeature: (feature, layer) => {
+    if (layer.setStyle) {
+      layer.options._baseStyle = styleMinerPoly(feature);
+    }
+    bindMinerPopup(feature, layer);
+    layer.on({ mouseover: hoverMinerEnter, mouseout: hoverMinerLeave });
+    try {
+      const nome = getEnterpriseName(feature.properties || {});
+      const tipo = getMineralType(feature.properties || {});
+      const label = nome ? `${nome} — ${tipo}` : `${tipo}`;
+      layer.bindTooltip(label, { direction:'top', opacity:0.9, sticky:false });
+    } catch(_){}
+  }
+})
+.on('data:loaded', () => {
+  // cria/atualiza a legenda quando terminar de carregar
+  addMineralLegend();
+});
+
+/* Legenda dinâmica da Mineração (por tipo) */
+let minerLegendCtrl = null;
+
+function buildMinerLegendHTML() {
+  if (!mineralColors.size) return '<i>(sem classes carregadas)</i>';
+  const itens = Array.from(mineralColors.entries())
+    .sort((a,b) => a[0].localeCompare(b[0],'pt-BR'))
+    .map(([tipo, cor]) =>
+      `<div style="display:flex;align-items:center;gap:6px;margin:4px 0;">
+         <span style="display:inline-block;width:16px;height:16px;background:${cor};border:1px solid #333;border-radius:3px;"></span>
+         <span style="font-size:13px;">${tipo}</span>
+       </div>`).join('');
+  return `<div style="font-weight:bold;margin-bottom:6px;">Tipos de Minério</div>${itens}`;
+}
+
+function addMineralLegend() {
+  if (minerLegendCtrl) {
+    const c = minerLegendCtrl.getContainer();
+    if (c) c.innerHTML = buildMinerLegendHTML();
+    return;
+  }
+  minerLegendCtrl = L.control({ position: 'bottomright' });
+  minerLegendCtrl.onAdd = function() {
+    const div = L.DomUtil.create('div', 'legend-mineracao');
+    div.style.background = 'white';
+    div.style.lineHeight = '18px';
+    div.style.color = '#333';
+    div.style.padding = '10px';
+    div.style.fontSize = '14px';
+    div.style.borderRadius = '6px';
+    div.style.maxWidth = '260px';
+    div.style.maxHeight = '40vh';
+    div.style.overflowY = 'auto';
+    div.style.boxShadow = 'var(--shadow)';
+    div.innerHTML = buildMinerLegendHTML();
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+  minerLegendCtrl.addTo(map);
+}
+
+
+
+
+ 
+
+    // Adiciona Hidrografia ao controle
+    layersControl.addOverlay(riosLayer, "Rios");
+    layersControl.addOverlay(massasAguaLayer, "Massas d'água");
+    layersControl.addOverlay(mineracaoLayer, "Mineração");
+
+    // Envelopar painel de camadas
+    map.whenReady(()=>{
+      const panel = document.querySelector('.leaflet-control-layers');
+      if (panel) {
+        panel.classList.add('collapsed-panel');
+        const wrapper = document.createElement('div');
+        wrapper.id = 'camadasWrapper';
+        const header = document.createElement('div');
+        header.id = 'camadasHeader';
+        header.innerText = 'Visualizar Camadas';
+        header.addEventListener('click', ()=> panel.classList.toggle('collapsed-panel'));
+        wrapper.appendChild(header);
+        wrapper.appendChild(panel);
+        document.body.appendChild(wrapper);
+      }
+    });
+
+    function recolherCamadas() {
+      const panel = document.querySelector('.leaflet-control-layers');
+      if (panel && !panel.classList.contains('collapsed-panel')) {
+        panel.classList.add('collapsed-panel');
+      }
+    }
+    (function ativarFechamentoCamadas(){
+      const onBodyClick = (e) => {
+        const wrapper = document.getElementById('camadasWrapper');
+        const panel = document.querySelector('.leaflet-control-layers');
+        if (!wrapper || !panel) return;
+        const aberto = !panel.classList.contains('collapsed-panel');
+        if (!aberto || wrapper.contains(e.target)) return;
+        recolherCamadas();
+      };
+      const onEsc = (e) => { if (e.key === 'Escape') recolherCamadas(); };
+      const bloquearDentro = () => {
+        const wrapper = document.getElementById('camadasWrapper');
+        if (!wrapper) return;
+        wrapper.addEventListener('click', e => e.stopPropagation());
+        wrapper.addEventListener('touchstart', e => e.stopPropagation(), {passive:true});
+      };
+      document.addEventListener('click', onBodyClick);
+      document.addEventListener('touchstart', onBodyClick, {passive:true});
+      document.addEventListener('keydown', onEsc);
+      if (document.getElementById('camadasWrapper')) bloquearDentro();
+      else {
+        const obs = new MutationObserver(() => {
+          if (document.getElementById('camadasWrapper')) { bloquearDentro(); obs.disconnect(); }
+        });
+        obs.observe(document.body, {childList:true, subtree:true});
+      }
+    })();
+    
+/* ==== MINERAÇÃO: classificação, popup e hover ==== */
+
+// Paleta para classes (vai ciclando se tiver muitas)
+const minerioPalette = [
+  '#1b9e77','#d95f02','#7570b3','#e7298a',
+  '#66a61e','#e6ab02','#a6761d','#666666',
+  '#1f78b4','#b2df8a','#fdbf6f','#cab2d6'
+];
+
+// mapa dinâmico "tipo → cor"
+const mineralColors = new Map();
+let mineralColorIndex = 0;
+
+// === usa EXCLUSIVAMENTE a coluna SUBS do GeoJSON ===
+function getMineralType(props = {}) {
+  // pega o valor bruto
+  let raw = props.SOBS ?? props.Subs ?? props.SUBS; // tolera variações acidentais
+  if (raw == null) return 'Desconhecido';
+
+  // normaliza: string, tira espaços, e padroniza capitalização
+  raw = String(raw).trim();
+  if (!raw) return 'Desconhecido';
+
+  // se vier múltiplas substâncias (ex.: "OURO / PRATA"), pega todas,
+  // mas classifica pela primeira (ajuste aqui se preferir outra lógica)
+  const first = raw.split(/[\/,;]+/)[0].trim();
+
+  // Title Case simples (OURO -> Ouro, ferro -> Ferro)
+  const tipo = first.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+
+  return tipo || 'Desconhecido';
+}
+// tenta pegar um "nome/empresa" para tooltip
+function getEnterpriseName(props = {}) {
+  const candidates = [
+    'empresa','nome','razao_social','razao','razaosocial','titular',
+    'EMPRESA','NOME','RAZAO_SOCIAL','TITULAR'
+  ];
+  const hit = candidates.find(k => Object.keys(props).some(p => p.toLowerCase() === k.toLowerCase()));
+  return hit ? (props[hit] || '').toString() : '';
+}
+
+// define/recupera cor para um tipo
+function colorForMineral(tipo) {
+  const key = (tipo || 'Desconhecido').toString();
+  if (!mineralColors.has(key)) {
+    mineralColors.set(key, minerioPalette[mineralColorIndex % minerioPalette.length]);
+    mineralColorIndex++;
+  }
+  return mineralColors.get(key);
+}
+
+// estilo p/ pontos (circleMarker)
+function styleMinerPoint(feature) {
+  const tipo = getMineralType(feature.properties);
+  const cor  = colorForMineral(tipo);
+  return {
+    pane: 'pane-mineracao',
+    radius: 6,
+    color: '#222',
+    weight: 1.5,
+    fillColor: cor,
+    fillOpacity: 0.85
+  };
+}
+
+// estilo p/ polígonos/linhas (se houver)
+function styleMinerPoly(feature) {
+  const tipo = getMineralType(feature.properties);
+  const cor  = colorForMineral(tipo);
+  return {
+    pane: 'pane-mineracao',
+    color: cor,
+    weight: 2.2,
+    fillColor: cor,
+    fillOpacity: 0.35
+  };
+}
+
+// popup com TODAS as propriedades + botão KML
+function bindMinerPopup(feature, layer) {
+  const p = feature.properties || {};
+  const linhas = Object.keys(p).sort().map(k =>
+    `<tr><th style="text-align:left;padding:4px;border-bottom:1px solid #eee;">${k}</th><td style="text-align:right;padding:4px;border-bottom:1px solid #eee;">${(p[k] ?? '').toString()}</td></tr>`
+  ).join('');
+  const tipo = getMineralType(p);
+  const titulo = `Mineração – ${tipo}`;
+  const html = `
+    <div style="font-weight:bold;margin-bottom:6px;">${titulo}</div>
+    <table style="border-collapse:collapse;width:100%;font-size:.95em;">${linhas || '<tr><td>(Sem atributos)</td></tr>'}</table>
+    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+      <button class="miner-kml-btn" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">Baixar KML</button>
+    </div>`;
+  layer.bindPopup(html);
+
+  layer.on('popupopen', (e) => {
+    const el = e.popup.getElement();
+    const btn = el.querySelector('.miner-kml-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const nomeArqBase = (getEnterpriseName(p) || tipo || 'mineracao')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/[^\w\s-]/g,'').replace(/\s+/g,'_');
+      let kml = tokml({ type:'FeatureCollection', features:[feature] });
+      const estiloKML = `
+        <Style id="minerStyle">
+          <IconStyle>
+            <Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon>
+          </IconStyle>
+          <LineStyle><color>ff333333</color><width>2</width></LineStyle>
+          <PolyStyle><color>80999999</color><fill>1</fill><outline>1</outline></PolyStyle>
+        </Style>`;
+      kml = kml.replace('</Document>', `${estiloKML}</Document>`)
+               .replace(/<Placemark>/g, '<Placemark><styleUrl>#minerStyle</styleUrl>');
+      const blob = new Blob([kml], { type:'application/vnd.google-earth.kml+xml' });
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${nomeArqBase}.kml`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+  });
+}
+
+// efeitos de hover
+function hoverMinerEnter(e) {
+  const l = e.target;
+  if (l instanceof L.CircleMarker) {
+    l.setStyle({ radius: 9, weight: 2.5 });
+  } else {
+    l.setStyle({ weight: 4, fillOpacity: 0.55 });
+  }
+  try { l.bringToFront(); } catch(_){}
+}
+function hoverMinerLeave(e) {
+  const l = e.target;
+  if (l.options && l.options._baseStyle) l.setStyle(l.options._baseStyle);
+}
+
+
+
+
+
+
+
+
+
+    /* === Legenda de Territórios === */
+    function addLegend() {
+      if (!territorioColors.length && territoriosLayer) {
+        territoriosLayer.eachLayer(l => {
+          const p = l.feature?.properties || {};
+          getColorForTerritorio(p.NM_TD || 'Território', p.fid || '');
+        });
+      }
+      document.querySelectorAll('.legend, .legend-toggle').forEach(el => el.remove());
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'legend-toggle attention';
+      toggleBtn.textContent = 'Selecionar  territórios';
+
+      const legendDiv = document.createElement('div');
+      legendDiv.className = 'legend collapsed';
+      legendDiv.innerHTML = '<div style="text-align:center;font-weight:bold;margin-bottom:5px;">Territórios de Desenvolvimento</div>';
+
+      territorioColors.slice().sort((a,b)=>(a.codigo||0)-(b.codigo||0)).forEach(t => {
+        const item = document.createElement('div');
+        item.className = 'territorio-item';
+        item.dataset.nome = t.nome;
+        item.style.cssText = 'cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+        item.innerHTML = `<i style="background:${t.cor};width:24px;height:24px;display:inline-block;"></i>
+                          <span style="font-size:13px;">${t.label}</span>`;
+        item.addEventListener('click', () => highlightTerritory(t.nome));
+        legendDiv.appendChild(item);
+      });
+
+      toggleBtn.addEventListener('click', () => {
+        legendDiv.classList.toggle('collapsed');
+        toggleBtn.textContent = legendDiv.classList.contains('collapsed') ? 'Selecionar  territórios' : 'Ocultar territórios';
+        toggleBtn.classList.remove('attention');
+      });
+
+      document.body.appendChild(toggleBtn);
+      document.body.appendChild(legendDiv);
+    }
+    function highlightTerritory(nome) {
+      territoriosLayer.eachLayer(layer => {
+        if (!layer.feature) return;
+        const nt = layer.feature.properties.NM_TD;
+        const ct = layer.feature.properties.fid;
+        if (nt === nome) {
+          const cor = getColorForTerritorio(nt, ct);
+          layer.setStyle({ color: cor, weight: 3, fillColor: cor, fillOpacity: 0.8 });
+          map.fitBounds(layer.getBounds());
+        } else {
+          layer.setStyle({ color:"#222", weight:1, fillColor:"#222", fillOpacity:0.8 });
+        }
+      });
+      municipiosLayer.eachLayer(mLayer => {
+        mLayer.off("mouseover", highlightFeature);
+        mLayer.off("mouseout", resetHighlight);
+        mLayer.on({ mouseover: highlightFeature, mouseout: resetHighlight });
+      });
+      document.querySelectorAll('.territorio-item').forEach(item=>{
+        item.style.fontWeight = (item.getAttribute('data-nome')===nome)?"bold":"normal";
+        item.style.color = (item.getAttribute('data-nome')===nome)?"#000":"";
+      });
+    }
+
+    /* Lat/Lon -> UTM + coordenadas */
+    function latLonToUTM(lat, lon) {
+      const a=6378137,f=1/298.257223563,k0=0.9996,e=Math.sqrt(f*(2-f));
+      const zone=Math.floor((lon+180)/6)+1, l0=(zone-1)*6-180+3, l0r=l0*Math.PI/180;
+      const p=lat*Math.PI/180, l=lon*Math.PI/180;
+      const N=a/Math.sqrt(1-e*e*Math.sin(p)*Math.sin(p)), T=Math.tan(p)*Math.tan(p), C=(e*e/(1-e*e))*Math.cos(p)*Math.cos(p), A=Math.cos(p)*(l-l0r);
+      const M=a*((1-e*e/4-3*e**4/64-5*e**6/256)*p-(3*e*e/8+3*e**4/32+45*e**6/1024)*Math.sin(2*p)+(15*e**4/256+45*e**6/1024)*Math.sin(4*p)-(35*e**6/3072)*Math.sin(6*p));
+      const x=k0*N*(A+(1-T+C)*A**3/6+(5-18*T+T*T+72*C-58*(e*e/(1-e*e)))*A**5/120)+500000;
+      let y=k0*(M+N*Math.tan(p)*(A**2/2+(5-T+9*C+4*C**2)*A**4/24+(61-58*T+T*T+600*C-330*(e*e/(1-e*e)))*A**6/720));
+      if(lat<0) y+=10000000;
+      return { x, y, zone };
+    }
+    const coordsDiv = document.getElementById('coords');
+    map.on('mousemove', e=>{
+      const lat=e.latlng.lat.toFixed(5), lon=e.latlng.lng.toFixed(5);
+      const utm=latLonToUTM(e.latlng.lat,e.latlng.lng);
+      coordsDiv.innerHTML = `Lat: ${lat}, Lon: ${lon}<br>E: ${utm.x.toFixed(2)}, N: ${utm.y.toFixed(2)}<br>Fuso: ${utm.zone}`;
+    });
+
+    /* Upload KML/KMZ */
+    const uploadBtnEl=document.getElementById('uploadBtn');
+    const uploadInputEl=document.getElementById('uploadInput');
+    uploadBtnEl.addEventListener('click', ()=>uploadInputEl.click());
+    uploadInputEl.addEventListener('change', async (e)=>{
+      const files=[...e.target.files];
+      for (const file of files){
+        const name=file.name;
+        try{
+          if(name.toLowerCase().endsWith('.kml')){
+            const text=await file.text(); addKMLTextToMap(text,name);
+          } else if(name.toLowerCase().endsWith('.kmz')){
+            const arrayBuf=await file.arrayBuffer(); const zip=await JSZip.loadAsync(arrayBuf);
+            let kmlEntry=null; zip.forEach((relPath,zipEntry)=>{ if(!kmlEntry && relPath.toLowerCase().endsWith('.kml')) kmlEntry=zipEntry; });
+            if(!kmlEntry){ alert('KMZ sem arquivo KML interno: '+name); continue; }
+            const kmlText=await kmlEntry.async('text'); addKMLTextToMap(kmlText,name);
+          } else { alert('Formato não suportado: '+name); }
+        } catch(err){ console.error(err); alert('Erro ao carregar '+name+': '+err.message); }
+      }
+      uploadInputEl.value='';
+    });
+    function addKMLTextToMap(kmlText, layerName){
+      const alvo = L.geoJSON(null, { pane: 'pane-upload' });
+      const kmlLayer = omnivore.kml.parse(kmlText, null, alvo).addTo(map);
+      if (kmlLayer.bringToFront) kmlLayer.bringToFront();
+      if (layersControl) layersControl.addOverlay(kmlLayer, layerName);
+      try { map.fitBounds(kmlLayer.getBounds()); } catch (_) {}
+    }
+
+    /* Rosa dos Ventos */
+    const rosaSBG = L.control({ position: "bottomleft" });
+    rosaSBG.onAdd = function () {
+      const div = L.DomUtil.create("div", "rosa-sbg");
+      div.innerHTML = `
+        <svg width="140" height="140" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="70,40 90,80 50,80" fill="black" />
+          <text x="70" y="30" font-size="36" font-weight="bold" fill="black" stroke="black" stroke-width="1" text-anchor="middle" dominant-baseline="middle">N</text>
+        </svg>`;
+      return div;
+    };
+    rosaSBG.addTo(map);
+
+    /* Estado do Piauí + Biomas recortados */
+    fetch("piaui.geojson").then(r=>r.json()).then(piauiData=>{
+      const piauiLayer = L.geoJSON(piauiData,{ pane: 'pane-piaui', style:{ color:'yellow', weight:3, fillColor:'transparent', fillOpacity:0 }, onEachFeature:(f,l)=>l.bindPopup("Estado do Piauí") }).addTo(map);
+      piauiLayer.bringToBack();
+      layersControl.addOverlay(piauiLayer,"Estado do Piauí");
+
+      const worldBounds = turf.bboxPolygon([-90,-60,-25,15]);
+      const mask = turf.difference(worldBounds, piauiData.features[0]);
+      L.geoJSON(mask,{ pane: 'pane-mask', style:{ fillColor:'black', fillOpacity:0.5, color:'black', weight:0 }, interactive:false }).addTo(map);
+
+      function styleBiomas(feature){
+        const bioma=(feature.properties.Bioma||feature.properties.bioma||"").toLowerCase();
+        switch(bioma){
+          case "amazônia": case "amazonia": return { color:"#1B5E20", fillColor:"#1B5E20", fillOpacity:0.5, weight:1 };
+          case "caatinga": return { color:"#E6B800", fillColor:"#E6B800", fillOpacity:0.5, weight:1 };
+          case "cerrado": return { color:"#4CAF50", fillColor:"#4CAF50", fillOpacity:0.5, weight:1 };
+          case "mata atlântica": case "mata atlantica": return { color:"#00695C", fillColor:"#00695C", fillOpacity:0.5, weight:1 };
+          case "pantanal": return { color:"#8D6E63", fillColor:"#8D6E63", fillOpacity:0.5, weight:1 };
+          case "pampa": return { color:"#A1887F", fillColor:"#A1887F", fillOpacity:0.5, weight:1 };
+          default: return { color:"#9E9E9E", fillColor:"#9E9E9E", fillOpacity:0.5, weight:1 };
+        }
+      }
+
+      fetch("biomas.geojson").then(r=>r.json()).then(biomasData=>{
+        const biomasRecortados={ type:"FeatureCollection", features:[] };
+        biomasData.features.forEach(f=>{
+          try{
+            const inter=turf.intersect(f, piauiData.features[0]);
+            if(inter){ inter.properties=f.properties; biomasRecortados.features.push(inter); }
+          }catch(e){ console.warn("Erro ao recortar bioma:", e); }
+        });
+        const biomasLayer = L.geoJSON(biomasRecortados,{ pane: 'pane-biomas', style: styleBiomas, onEachFeature: (feature, layer)=>layer.bindPopup(`<b>Bioma:</b> ${feature.properties.Bioma||feature.properties.bioma||"Bioma"}`) });
+        layersControl.addOverlay(biomasLayer, "Biomas");
+      });
+    });
+
+    /* ESC limpa seleção e recolhe busca */
+    document.addEventListener('keydown', e=>{
+      if (e.key==="Escape") {
+        territorioSelecionado=null;
+        territoriosLayer.eachLayer(layer=>territoriosLayer.resetStyle(layer));
+        const sc = document.getElementById('searchContainer');
+        const si = document.getElementById('searchMunicipio');
+        const lm = document.getElementById('listaMunicipios');
+        if (sc.classList.contains('expanded')) {
+          sc.classList.remove('expanded');
+          si.value = '';
+          lm.style.display='none';
+        }
+      }
+    });
+
+    // Ajuste de bounds inicial
+    setTimeout(()=>{
+      const group=new L.featureGroup([territoriosLayer, municipiosLayer]);
+      try { map.fitBounds(group.getBounds(), { padding:[20,20] }); } catch(_) {}
+    }, 800);
+
+    // Resize handler
+    function ajustarMapa(){ document.getElementById('map').style.height=window.innerHeight+'px'; }
+    window.addEventListener('resize', ajustarMapa);
+    window.addEventListener('orientationchange', ajustarMapa);
+    ajustarMapa();
+
+    // Busca expansível + clique fora
+    (()=>{
+      const sc = document.getElementById('searchContainer');
+      const st = document.getElementById('searchToggle');
+      const si = document.getElementById('searchMunicipio');
+      const lm = document.getElementById('listaMunicipios');
+      st.addEventListener('click', ()=>{
+        sc.classList.toggle('expanded');
+        if (sc.classList.contains('expanded')) si.focus();
+        else { si.value=''; lm.style.display='none'; }
+      });
+      document.addEventListener('click', (e)=>{
+        if (!sc.contains(e.target) && sc.classList.contains('expanded')) {
+          sc.classList.remove('expanded');
+          si.value=''; lm.style.display='none';
+        }
+      });
+    })();
+
+    /* Busca Fuzzy */
+    let highlightedIndex = -1;
+    function levenshtein(a,b){
+      const m=[]; for(let i=0;i<=b.length;i++){m[i]=[i]} for(let j=0;j<=a.length;j++){m[0][j]=j}
+      for(let i=1;i<=b.length;i++){ for(let j=1;j<=a.length;j++){
+        m[i][j]=(b.charAt(i-1)===a.charAt(j-1))?m[i-1][j-1]:Math.min(m[i-1][j-1]+1, Math.min(m[i][j-1]+1, m[i-1][j]+1))
+      }}
+      return m[b.length][a.length]
+    }
+    function updateHighlight(itens){
+      itens.forEach((item,idx)=>{
+        if(idx===highlightedIndex){ item.classList.add('highlighted'); item.scrollIntoView({block:'nearest'}); }
+        else item.classList.remove('highlighted');
+      });
+    }
+    const si = document.getElementById('searchMunicipio');
+    const lm = document.getElementById('listaMunicipios');
+    si.addEventListener('input', function(){
+      const termo = this.value.trim().toLowerCase();
+      lm.innerHTML = ''; highlightedIndex = -1;
+      if(!termo){ lm.style.display = 'none'; return; }
+      const resultados = [];
+      municipiosLayer.eachLayer(layer=>{
+        const nomeMun = layer.feature?.properties?.NM_MUN;
+        if(!nomeMun) return;
+        const nomeLower = nomeMun.toLowerCase();
+        if (nomeLower.includes(termo)) resultados.push({nome:nomeMun, layer});
+        else if (levenshtein(termo, nomeLower) <= 3) resultados.push({nome:nomeMun, layer});
+      });
+      if(!resultados.length){ lm.style.display='none'; return; }
+      resultados.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+      resultados.forEach(item=>{
+        const div = document.createElement('div');
+        div.textContent = item.nome;
+        div.addEventListener('click', ()=>{
+          map.fitBounds(item.layer.getBounds(), { padding:[20,20] });
+          if (municipioSelecionado) municipiosLayer.resetStyle(municipioSelecionado);
+          municipioSelecionado = item.layer;
+          item.layer.setStyle({ weight:4, color:'#ff6600', fillColor:'#ff6600', fillOpacity:0.5 });
+          item.layer.closePopup();
+          lm.style.display = 'none';
+          si.value = item.nome;
+          recolherLegenda();
+        });
+        lm.appendChild(div);
+      });
+      lm.style.display = 'block';
+    });
+    si.addEventListener('keydown', (e)=>{
+      const itens = lm.querySelectorAll('div');
+      if (e.key === 'ArrowDown'){ e.preventDefault(); if (highlightedIndex < itens.length - 1){ highlightedIndex++; updateHighlight(itens); } }
+      else if (e.key === 'ArrowUp'){ e.preventDefault(); if (highlightedIndex > 0){ highlightedIndex--; updateHighlight(itens); } }
+      else if (e.key === 'Enter'){ e.preventDefault(); if (highlightedIndex >= 0 && highlightedIndex < itens.length){ itens[highlightedIndex].click(); } else { lm.style.display = 'none'; } }
+    });
+    function recolherLegenda() {
+      const legendDiv = document.querySelector('.legend');
+      const toggleBtn = document.querySelector('.legend-toggle');
+      if (legendDiv && toggleBtn) {
+        legendDiv.classList.add('collapsed');
+        toggleBtn.textContent = 'Selecionar  territórios';
+        toggleBtn.classList.remove('attention');
+      }
+    }
+  </script>
+
+  <div id="creditosLegenda">
+    Coordenação de Cartografia e Análise Espacial<br>
+    CCAE/GEID/DEAE/CIET/SEPLAN
+  </div>
+</body>
+</html>
