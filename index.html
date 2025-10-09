@@ -649,6 +649,9 @@ const mineracaoLayer = new L.GeoJSON.AJAX("Mineração_PI.geojson", {
   // cria/atualiza a legenda quando terminar de carregar
   addMineralLegend();
 });
+mineracaoLayer.addTo(map);
+
+
 
 /* Legenda dinâmica da Mineração (por tipo) */
 let minerLegendCtrl = null;
