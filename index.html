@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -678,10 +679,7 @@ const mineracaoLayer = new L.GeoJSON.AJAX("Mineração_PI.geojson", {
     } catch(_){}
   }
 })
-.on('data:loaded', () => {
-  // cria/atualiza a legenda quando terminar de carregar
-  addMineralLegend();
-});
+
 // NÃO adiciona o mineracaoLayer direto ao mapa.
 // Ele servirá só para carregar e organizar as feições por tipo.
 
@@ -707,10 +705,12 @@ function wireFeaturesToGroups(){
   mineracaoLayer.eachLayer(l => {
     const p = l?.feature?.properties || {};
     const tipo = getMineralType(p);
-    const grp = getMineralGroup(tipo);
-    grp.addLayer(l);          // passa a "viver" dentro do grupo do tipo
+    const grp  = getMineralGroup(tipo);
+    l._minerTypeKey = tipo;    // <<< guarda o tipo do grupo desta feição
+    grp.addLayer(l);
   });
 }
+
 
 mineracaoLayer.on('data:loaded', () => {
   wireFeaturesToGroups();     // organiza por tipo
@@ -728,23 +728,40 @@ function setTypeVisibility(tipo, visible){
 
   if (visible){
     visibleTypes.add(key);
-    // garante que o grupo está dentro do "raiz"
     mineracaoRoot.addLayer(grp);
   } else {
     visibleTypes.delete(key);
-    // retira o grupo do "raiz" (desaparece do mapa)
     mineracaoRoot.removeLayer(grp);
   }
+  applyMinerFilters(); // revalida após mudar o tipo
 }
+
 
 function buildMinerLegendHTML() {
   if (!mineralColors.size) return '<i>(sem classes carregadas)</i>';
 
-  // 🔹 Título e botões embaixo
-  let header = `
+  const header = `
     <div style="font-weight:bold;text-align:center;margin-bottom:6px;">
       Tipos de Minério
     </div>
+
+    <!-- Filtros -->
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+      <input id="minerSearchProc" type="text" placeholder="Pesquisar por Processo"
+             value="${minerSearchProcVal || ''}"
+             style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;"/>
+      <input id="minerSearchSubs" type="text" placeholder="Filtrar por Substância"
+             value="${minerSearchSubsVal || ''}"
+             style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;"/>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" id="minerClearFilters"
+          style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">
+          Limpar filtros
+        </button>
+      </div>
+    </div>
+
+    <!-- Ações de tipos -->
     <div style="display:flex;justify-content:center;gap:10px;margin-bottom:10px;">
       <button type="button" id="minerCheckAll"
         style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">
@@ -813,7 +830,7 @@ function addMineralLegend() {
 
 // Conecta eventos dos checkboxes e botões Selecionar Tudo/Limpar
 function wireLegendEvents(container){
-  // Checkboxes
+  // Checkboxes de tipos
   container.querySelectorAll('input[type="checkbox"][data-tipo]').forEach(chk => {
     chk.addEventListener('change', (ev) => {
       const tipo = ev.target.getAttribute('data-tipo');
@@ -827,20 +844,75 @@ function wireLegendEvents(container){
   if (btnAll){
     btnAll.addEventListener('click', () => {
       mineralGroups.forEach((_grp, tipo) => setTypeVisibility(tipo, true));
-      addMineralLegend(); // re-render para refletir "checked"
+      addMineralLegend(); // re-render
     });
   }
 
-  // Limpar
+  // Limpar (desmarca todos os tipos)
   const btnNone = container.querySelector('#minerUncheckAll');
   if (btnNone){
     btnNone.addEventListener('click', () => {
       mineralGroups.forEach((_grp, tipo) => setTypeVisibility(tipo, false));
-      addMineralLegend(); // re-render para refletir "checked"
+      addMineralLegend(); // re-render
     });
   }
-}
 
+  // === NOVO: campos de busca ===
+  const inpProc = container.querySelector('#minerSearchProc');
+  const inpSubs = container.querySelector('#minerSearchSubs');
+  const debouncedApply = debounce(() => {
+    minerSearchProcVal = inpProc?.value || '';
+    minerSearchSubsVal = inpSubs?.value || '';
+    applyMinerFilters();
+  }, 200);
+
+  if (inpProc) inpProc.addEventListener('input', debouncedApply);
+  if (inpSubs) inpSubs.addEventListener('input', debouncedApply);
+
+  const btnClear = container.querySelector('#minerClearFilters');
+  if (btnClear){
+    btnClear.addEventListener('click', () => {
+      if (inpProc) inpProc.value = '';
+      if (inpSubs) inpSubs.value = '';
+      minerSearchProcVal = '';
+      minerSearchSubsVal = '';
+      applyMinerFilters();
+    });
+  }
+
+  // 🔹 Enter desativa todos que não correspondem
+  const handleEnter = (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      minerSearchProcVal = inpProc?.value || '';
+      minerSearchSubsVal = inpSubs?.value || '';
+
+      // Aplica filtros primeiro
+      applyMinerFilters();
+
+      // Desativa todos os tipos sem correspondência
+      const foundTypes = new Set();
+      mineracaoLayer.eachLayer(l => {
+        const p = l.feature?.properties || {};
+        const tipo = (l._minerTypeKey || getMineralType(p));
+        const proc = getProcessoValue(p);
+        const matchSubs = textMatches(tipo, minerSearchSubsVal);
+        const matchProc = textMatches(proc, minerSearchProcVal);
+        if (matchSubs && matchProc) foundTypes.add(tipo);
+      });
+
+      mineralGroups.forEach((_grp, tipo) => {
+        setTypeVisibility(tipo, foundTypes.has(tipo));
+      });
+
+      // Atualiza a legenda visualmente
+      addMineralLegend();
+    }
+  };
+
+  if (inpProc) inpProc.addEventListener('keydown', handleEnter);
+  if (inpSubs) inpSubs.addEventListener('keydown', handleEnter);
+}
 
 
     // Adiciona Hidrografia ao controle
@@ -902,6 +974,48 @@ layersControl.addOverlay(mineracaoRoot, "Mineração");
     })();
     
 /* ==== MINERAÇÃO: classificação, popup e hover ==== */
+// ===== BUSCA NA LEGENDA (estado + helpers) =====
+let minerSearchProcVal = '';
+let minerSearchSubsVal = '';
+
+function getProcessoValue(props = {}){
+  return pickProp(props, [
+    'processo','proc','processo_dnpm','processo_anm',
+    'n_processo','número','numero','nup','num'
+  ]);
+}
+function textMatches(value, query){
+  if (!query) return true;
+  const v = (value ?? '').toString().toLowerCase();
+  return v.includes(query.toLowerCase());
+}
+function debounce(fn, wait=250){
+  let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
+}
+function applyMinerFilters(){
+  const qProc = (minerSearchProcVal || '').trim().toLowerCase();
+  const qSubs = (minerSearchSubsVal || '').trim().toLowerCase();
+
+  mineracaoLayer.eachLayer(l => {
+    const p    = l?.feature?.properties || {};
+    const tipo = (l._minerTypeKey || getMineralType(p) || '').toString();
+    const proc = getProcessoValue(p) || '';
+
+    const typeVisible = visibleTypes.has(tipo);
+    const matchSubs   = textMatches(tipo, qSubs);
+    const matchProc   = textMatches(proc, qProc);
+    const pass        = typeVisible && matchSubs && matchProc;
+
+    const grp = mineralGroups.get(tipo);
+    if (!grp) return;
+
+    if (pass){
+      if (!grp.hasLayer(l)) grp.addLayer(l);
+    } else {
+      if (grp.hasLayer(l)) grp.removeLayer(l);
+    }
+  });
+}
 
 // Paleta para classes (vai ciclando se tiver muitas)
 const minerioPalette = [
