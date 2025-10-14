@@ -138,11 +138,45 @@
       .rosa-sbg { width: 120px; height: 120px; }
     }
 
-
+.legend-mineracao{
+  max-height: 40vh;        /* já está no JS, mas pode manter aqui também */
+  overflow-y: auto;        /* garante a barra */
+  -webkit-overflow-scrolling: touch; /* momentum scrolling no iOS/Android */
+  touch-action: pan-y;     /* permite arrastar verticalmente sem conflitar com o mapa */
+}
     .legend-mineracao { z-index: var(--z-legend); }
 @media (max-width: 768px) {
   .legend-mineracao { font-size: 13px; }
 }
+
+/* --- Legenda Mineração: expansível --- */
+.legend-mineracao { position: relative; }
+.legend-mineracao .miner-header{
+  display:flex; align-items:center; gap:8px;
+  font-weight:bold; cursor:pointer; user-select:none;
+  padding:6px 8px; margin:-6px -6px 8px -6px; /* encosta nas bordas do card */
+  border-bottom:1px solid #eee;
+}
+.legend-mineracao .miner-header .arrow{
+  transition: transform .25s ease;
+  display:inline-block; width:0; height:0;
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-top:8px solid #333;
+}
+.legend-mineracao.expanded .miner-header .arrow{ transform: rotate(180deg); }
+
+.legend-mineracao .miner-body{ display:none; }
+.legend-mineracao.expanded .miner-body{ display:block; }
+
+/* melhora toque/rolagem dentro do corpo */
+.legend-mineracao .miner-body{
+  max-height: 40vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
   </style>
 </head>
 <body>
@@ -649,31 +683,107 @@ const mineracaoLayer = new L.GeoJSON.AJAX("Mineração_PI.geojson", {
   // cria/atualiza a legenda quando terminar de carregar
   addMineralLegend();
 });
-mineracaoLayer.addTo(map);
+// NÃO adiciona o mineracaoLayer direto ao mapa.
+// Ele servirá só para carregar e organizar as feições por tipo.
 
+// === Grupos por tipo de minério ===
+const mineralGroups = new Map();     // "tipo" -> L.LayerGroup
+const visibleTypes  = new Set();     // conjunto dos tipos visíveis
 
+function getMineralGroup(tipo){
+  const key = (tipo || 'Desconhecido').toString();
+  if (!mineralGroups.has(key)) {
+    const g = L.layerGroup();
+    mineralGroups.set(key, g);
+    // por padrão, tudo começa visível
+    visibleTypes.add(key);
+    // adiciona o grupo ao "raiz" (que está no mapa)
+    mineracaoRoot.addLayer(g);
+  }
+  return mineralGroups.get(key);
+}
 
-/* Legenda dinâmica da Mineração (por tipo) */
+// Move cada feição carregada para o grupo do seu tipo
+function wireFeaturesToGroups(){
+  mineracaoLayer.eachLayer(l => {
+    const p = l?.feature?.properties || {};
+    const tipo = getMineralType(p);
+    const grp = getMineralGroup(tipo);
+    grp.addLayer(l);          // passa a "viver" dentro do grupo do tipo
+  });
+}
+
+mineracaoLayer.on('data:loaded', () => {
+  wireFeaturesToGroups();     // organiza por tipo
+  addMineralLegend();         // (re)constrói a legenda com checkboxes
+});
+
+/* ====== Legenda dinâmica da Mineração (com liga/desliga por tipo) ====== */
 let minerLegendCtrl = null;
+
+// Liga/Desliga um tipo
+function setTypeVisibility(tipo, visible){
+  const key = (tipo || 'Desconhecido').toString();
+  const grp = mineralGroups.get(key);
+  if (!grp) return;
+
+  if (visible){
+    visibleTypes.add(key);
+    // garante que o grupo está dentro do "raiz"
+    mineracaoRoot.addLayer(grp);
+  } else {
+    visibleTypes.delete(key);
+    // retira o grupo do "raiz" (desaparece do mapa)
+    mineracaoRoot.removeLayer(grp);
+  }
+}
 
 function buildMinerLegendHTML() {
   if (!mineralColors.size) return '<i>(sem classes carregadas)</i>';
+
+  // 🔹 Título e botões embaixo
+  let header = `
+    <div style="font-weight:bold;text-align:center;margin-bottom:6px;">
+      Tipos de Minério
+    </div>
+    <div style="display:flex;justify-content:center;gap:10px;margin-bottom:10px;">
+      <button type="button" id="minerCheckAll"
+        style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">
+        Selecionar tudo
+      </button>
+      <button type="button" id="minerUncheckAll"
+        style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">
+        Limpar
+      </button>
+    </div>`;
+
   const itens = Array.from(mineralColors.entries())
     .sort((a,b) => a[0].localeCompare(b[0],'pt-BR'))
-    .map(([tipo, cor]) =>
-      `<div style="display:flex;align-items:center;gap:6px;margin:4px 0;">
-         <span style="display:inline-block;width:16px;height:16px;background:${cor};border:1px solid #333;border-radius:3px;"></span>
-         <span style="font-size:13px;">${tipo}</span>
-       </div>`).join('');
-  return `<div style="font-weight:bold;margin-bottom:6px;">Tipos de Minério</div>${itens}`;
+    .map(([tipo, cor]) => {
+      const checked = visibleTypes.has(tipo) ? 'checked' : '';
+      const id = `chk_${tipo.replace(/\W+/g,'_')}`;
+      return `
+        <label for="${id}" style="display:flex;align-items:center;gap:8px;margin:6px 0;cursor:pointer;">
+          <input type="checkbox" id="${id}" data-tipo="${tipo}" ${checked} />
+          <span style="display:inline-block;width:16px;height:16px;background:${cor};border:1px solid #333;border-radius:3px;"></span>
+          <span style="font-size:13px;">${tipo}</span>
+        </label>`;
+    }).join('');
+
+  return header + itens;
 }
+
 
 function addMineralLegend() {
   if (minerLegendCtrl) {
     const c = minerLegendCtrl.getContainer();
-    if (c) c.innerHTML = buildMinerLegendHTML();
+    if (c) {
+      c.innerHTML = buildMinerLegendHTML();
+      wireLegendEvents(c);
+    }
     return;
   }
+
   minerLegendCtrl = L.control({ position: 'bottomright' });
   minerLegendCtrl.onAdd = function() {
     const div = L.DomUtil.create('div', 'legend-mineracao');
@@ -688,21 +798,58 @@ function addMineralLegend() {
     div.style.overflowY = 'auto';
     div.style.boxShadow = 'var(--shadow)';
     div.innerHTML = buildMinerLegendHTML();
+
+    // ESSENCIAL: permite rolar a legenda sem arrastar o mapa
     L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    div.addEventListener('wheel',  e => e.stopPropagation(), { passive: false });
+    div.addEventListener('touchmove', e => e.stopPropagation(), { passive: false });
+
+    // liga os eventos dos checkboxes/botões
+    wireLegendEvents(div);
     return div;
   };
   minerLegendCtrl.addTo(map);
 }
 
+// Conecta eventos dos checkboxes e botões Selecionar Tudo/Limpar
+function wireLegendEvents(container){
+  // Checkboxes
+  container.querySelectorAll('input[type="checkbox"][data-tipo]').forEach(chk => {
+    chk.addEventListener('change', (ev) => {
+      const tipo = ev.target.getAttribute('data-tipo');
+      const visible = ev.target.checked;
+      setTypeVisibility(tipo, visible);
+    });
+  });
+
+  // Selecionar tudo
+  const btnAll = container.querySelector('#minerCheckAll');
+  if (btnAll){
+    btnAll.addEventListener('click', () => {
+      mineralGroups.forEach((_grp, tipo) => setTypeVisibility(tipo, true));
+      addMineralLegend(); // re-render para refletir "checked"
+    });
+  }
+
+  // Limpar
+  const btnNone = container.querySelector('#minerUncheckAll');
+  if (btnNone){
+    btnNone.addEventListener('click', () => {
+      mineralGroups.forEach((_grp, tipo) => setTypeVisibility(tipo, false));
+      addMineralLegend(); // re-render para refletir "checked"
+    });
+  }
+}
 
 
-
- 
 
     // Adiciona Hidrografia ao controle
     layersControl.addOverlay(riosLayer, "Rios");
     layersControl.addOverlay(massasAguaLayer, "Massas d'água");
-    layersControl.addOverlay(mineracaoLayer, "Mineração");
+  // Grupo-raiz para todos os tipos de mineração (liga/desliga geral)
+const mineracaoRoot = L.layerGroup().addTo(map);
+layersControl.addOverlay(mineracaoRoot, "Mineração");
 
     // Envelopar painel de camadas
     map.whenReady(()=>{
@@ -768,25 +915,37 @@ const minerioPalette = [
 const mineralColors = new Map();
 let mineralColorIndex = 0;
 
-// === usa EXCLUSIVAMENTE a coluna SUBS do GeoJSON ===
+// helper: Title Case com suporte a acentos (pt-BR)
+function toTitleCasePt(str){
+  return String(str)
+    .toLocaleLowerCase('pt-BR')
+    // cada sequência de letras (inclui acentos) vira "Primeira Maiúscula + resto minúsculo"
+    .replace(/\p{L}+/gu, w => {
+      const first = w[0].toLocaleUpperCase('pt-BR');
+      const rest  = w.slice(1); // já está minúsculo pelo toLocaleLowerCase acima
+      return first + rest;
+    });
+}
+
 function getMineralType(props = {}) {
-  // pega o valor bruto
-  let raw = props.SOBS ?? props.Subs ?? props.SUBS; // tolera variações acidentais
+  // tolera variações: SUBS / Subs / SOBS
+  let raw = props.SOBS ?? props.Subs ?? props.SUBS;
   if (raw == null) return 'Desconhecido';
 
-  // normaliza: string, tira espaços, e padroniza capitalização
   raw = String(raw).trim();
   if (!raw) return 'Desconhecido';
 
-  // se vier múltiplas substâncias (ex.: "OURO / PRATA"), pega todas,
-  // mas classifica pela primeira (ajuste aqui se preferir outra lógica)
+  // pega a primeira substância quando vier separado por / , ;
   const first = raw.split(/[\/,;]+/)[0].trim();
 
-  // Title Case simples (OURO -> Ouro, ferro -> Ferro)
-  const tipo = first.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  // aplica Title Case correto (Água, Ouro, Ferro, etc.)
+  const tipo = toTitleCasePt(first);
 
   return tipo || 'Desconhecido';
 }
+
+
+
 // tenta pegar um "nome/empresa" para tooltip
 function getEnterpriseName(props = {}) {
   const candidates = [
@@ -834,20 +993,103 @@ function styleMinerPoly(feature) {
   };
 }
 
-// popup com TODAS as propriedades + botão KML
+// ====== HELPERS PADRÃO TABELA ======
+function pickProp(props, keys) {
+  for (const k of keys) {
+    const hit = Object.keys(props).find(p => p.toLowerCase() === String(k).toLowerCase());
+    if (hit && props[hit] != null && String(props[hit]).trim() !== '') return props[hit];
+  }
+  return null;
+}
+
+function formatAreaHa(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v ?? '-');
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDateBr(v) {
+  if (!v) return '-';
+  // tenta ISO/aaaa-mm-dd, timestamp, etc.
+  const d = new Date(v);
+  if (!isNaN(d.getTime())) {
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  // tenta dd/mm/aaaa já pronto
+  const m = String(v).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    const dd = m[1].padStart(2,'0'), mm = m[2].padStart(2,'0');
+    const yyyy = m[3].length === 2 ? ('20'+m[3]) : m[3];
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  return String(v);
+}
+
+// ====== SUBSTITUA SUA bindMinerPopup POR ESTA ======
 function bindMinerPopup(feature, layer) {
   const p = feature.properties || {};
-  const linhas = Object.keys(p).sort().map(k =>
-    `<tr><th style="text-align:left;padding:4px;border-bottom:1px solid #eee;">${k}</th><td style="text-align:right;padding:4px;border-bottom:1px solid #eee;">${(p[k] ?? '').toString()}</td></tr>`
-  ).join('');
-  const tipo = getMineralType(p);
-  const titulo = `Mineração – ${tipo}`;
+  const tipo = getMineralType(p); // já corrige "Água", etc.
+
+  // Mapeamento: cada rótulo → possíveis chaves na sua base
+  const FIELD_MAP = [
+    { label: 'Processo',       keys: ['processo','proc','processo_dnpm','processo_anm'] },
+    { label: 'Número',         keys: ['numero','número','n_processo','nup','num'] },
+    { label: 'Ano',            keys: ['ano','year'] },
+    { label: 'Fase',           keys: ['fase','situacao','situação','status'] },
+    { label: 'Titular',        keys: ['titular','empresa','razao_social','razão_social','nome'] },
+    // Substância será calculada, mas também tentamos pegar o bruto se houver
+    { label: 'Substância',     keys: ['subs','sobs','substancia','substância'] },
+    { label: 'Uso',            keys: ['uso','finalidade','aplicacao','aplicação'] },
+    { label: 'Área (ha)',      keys: ['area_ha','área_ha','area','área','ha'] },
+    { label: 'UF',             keys: ['uf','estado'] },
+    { label: 'Último evento',  keys: ['ultimo_evento','último_evento','ult_evento','data_evento','data_ultimo_evento'] },
+    { label: 'ID',             keys: ['id','codigo','código','cod'] },
+  ];
+
+  const rows = [];
+
+  for (const f of FIELD_MAP) {
+    let val = pickProp(p, f.keys);
+
+    // Pós-processamentos por campo
+    if (f.label === 'Substância') {
+      // Preferimos o tipo normalizado; se não existir nada bruto, usamos o tipo
+      val = tipo || val || '-';
+    } else if (f.label === 'Área (ha)') {
+      if (val == null && p.area_m2) {
+        // fallback: se vier em m², converte para ha
+        const ha = Number(p.area_m2) / 10000;
+        val = ha;
+      }
+      val = formatAreaHa(val);
+    } else if (f.label === 'UF') {
+      val = (val == null) ? '-' : String(val).toUpperCase();
+    } else if (f.label === 'Último evento') {
+      val = formatDateBr(val);
+    } else if (val == null || String(val).trim() === '') {
+      val = '-';
+    }
+
+    rows.push(
+      `<tr>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:bold;">${f.label}</th>
+        <td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${val}</td>
+       </tr>`
+    );
+  }
+
   const html = `
-    <div style="font-weight:bold;margin-bottom:6px;">${titulo}</div>
-    <table style="border-collapse:collapse;width:100%;font-size:.95em;">${linhas || '<tr><td>(Sem atributos)</td></tr>'}</table>
+    <div style="font-weight:bold;margin-bottom:6px;">Mineração — ${tipo || '-'}</div>
+    <table style="border-collapse:collapse;width:100%;font-size:.95em;">
+      ${rows.join('')}
+    </table>
     <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
       <button class="miner-kml-btn" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">Baixar KML</button>
     </div>`;
+
   layer.bindPopup(html);
 
   layer.on('popupopen', (e) => {
@@ -876,6 +1118,7 @@ function bindMinerPopup(feature, layer) {
     });
   });
 }
+
 
 // efeitos de hover
 function hoverMinerEnter(e) {
