@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1319,11 +1318,14 @@ function hoverMinerLeave(e) {
     });
 
     // Ajuste de bounds inicial
-    setTimeout(()=>{
-      const group=new L.featureGroup([territoriosLayer, municipiosLayer]);
-      try { map.fitBounds(group.getBounds(), { padding:[20,20] }); } catch(_) {}
-    }, 800);
-
+  setTimeout(()=>{
+  const group = new L.featureGroup([territoriosLayer, municipiosLayer]);
+  try { 
+    map.fitBounds(group.getBounds(), { padding:[20,20] }); 
+    // trava o zoom mínimo no valor atual
+    map.setMinZoom(map.getZoom());
+  } catch(_) {}
+}, 800);
     // Resize handler
     function ajustarMapa(){ document.getElementById('map').style.height=window.innerHeight+'px'; }
     window.addEventListener('resize', ajustarMapa);
