@@ -583,15 +583,45 @@ map.createPane('pane-uc-estadual');  map.getPane('pane-uc-estadual').style.zInde
       return key ? props[key] : fallback;
     }
 
+
+// --- CORREÇÃO DE CODIFICAÇÃO (para nomes com Ã, Ã©, Ã³, etc.) ---
+function repairMojibake(s){
+  if (s == null) return s;
+  try { return decodeURIComponent(escape(String(s))); }
+  catch(_) { return String(s); }
+}
 /* ==== UNIDADES DE CONSERVAÇÃO: helpers ==== */
 function ucGetNome(props = {}){
-  return pickProp(props, ['nome','NOME','Name','NAME','nm_uc','NM_UC','nm','NM']) || 'Unidade de Conservação';
+  // tenta primeiro várias chaves comuns em bases federais/estaduais
+  let v = pickProp(props, [
+    'nome','NOME','Name','NAME',
+    'nm_uc','NM_UC','nome_uc','NOME_UC','no_uc','NO_UC',
+    'ds_nome','DS_NOME','ds_nome_uc','DS_NOME_UC',
+    'uc','UC','nm','NM','descricao','DESCRICAO','descrição','DESCRIÇÃO'
+  ]);
+
+  // fallback heurístico: qualquer chave que tenha "nome" e ("uc" ou "unidade")
+  if (v == null || String(v).trim() === '') {
+    const dyn = Object.keys(props).find(k =>
+      /nome/i.test(k) && (/\buc\b/i.test(k) || /unidade/i.test(k))
+    );
+    if (dyn) v = props[dyn];
+  }
+
+  const nome = repairMojibake(v);
+  return (nome && String(nome).trim()) ? String(nome).trim() : 'Unidade de Conservação';
 }
+
 function ucGetCategoria(props = {}){
-  return pickProp(props, ['categoria','CATEGORIA','categoria_uc','CAT','tipo','TIPO','grupo','GRUPO']) || '-';
+  return repairMojibake(
+    pickProp(props, ['categoria','CATEGORIA','categoria_uc','CAT','tipo','TIPO','grupo','GRUPO'])
+  ) || '-';
 }
+
 function ucGetAto(props = {}){
-  return pickProp(props, ['ato','ato_criacao','ATO_CRIACAO','ato_criação','ATO','fundamento','FUNDAMENTO']) || '-';
+  return repairMojibake(
+    pickProp(props, ['ato','ato_criacao','ATO_CRIACAO','ato_criação','ATO','fundamento','FUNDAMENTO'])
+  ) || '-';
 }
 function ucGetArea(props = {}){
   // tenta ha, senão tenta m² e converte
@@ -648,15 +678,14 @@ function bindUCPopup(feature, layer, esfera){
     </tr>`).join('');
 
   const html = `
-    <div style="font-weight:bold;margin-bottom:6px;">${esfera} • ${nome}</div>
-    <table style="border-collapse:collapse;width:100%;font-size:.95em;">${rows}</table>
-    <div style="margin-top:8px;"><b>Atributos completos</b></div>
-    ${buildPropsTableAll(p)}
-    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-      <button class="uc-kml-btn" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">Baixar KML</button>
-    </div>`;
-
-  layer.bindPopup(html);
+  <div style="font-weight:bold;margin-bottom:6px;">${esfera} • ${nome}</div>
+  <table style="border-collapse:collapse;width:100%;font-size:.95em;">${rows}</table>
+  <div style="margin-top:8px;"><b>Atributos completos</b></div>
+  ${buildPropsTableAll(p)}
+  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+   <button class="uc-kml-btn">Baixar KML</button>
+  </div>`;
+layer.bindPopup(html);
 
   layer.on('popupopen', (e)=>{
     const el = e.popup.getElement();
@@ -881,18 +910,21 @@ try {
 const PATH_UC_FED = 'unidadesdeconservacaofederal.geojson';
 const PATH_UC_EST = 'unidadesdeconservacaoestadual.geojson';
 
-// Federais
 const ucFederalLayer = new L.GeoJSON.AJAX(PATH_UC_FED, {
   pane: 'pane-uc-federal',
-  style: (f)=>{ const st = styleUC(f, true); return st; },
+  style: (f)=> styleUC(f, true),
   onEachFeature: (feature, layer)=>{
     if (layer.setStyle) layer.options._baseStyle = styleUC(feature, true);
+
+    // 🔴 força o título a usar exatamente o campo NomeUC
+    if (feature.properties && feature.properties.NomeUC) {
+      feature.properties.nome = feature.properties.NomeUC;
+    }
+
     bindUCPopup(feature, layer, 'UC Federal');
     layer.on({ mouseover: hoverUCEnter, mouseout: hoverUCLeave });
   }
 });
-
-// Estaduais
 const ucEstadualLayer = new L.GeoJSON.AJAX(PATH_UC_EST, {
   pane: 'pane-uc-estadual',
   style: (f)=>{ const st = styleUC(f, false); return st; },
@@ -2328,6 +2360,7 @@ function buildPropsTableAll(props = {}) {
   const rows = keys.map(k => {
     let v = props[k];
     if (typeof v === 'number') v = v.toLocaleString('pt-BR');
+    if (v != null && v !== '') v = repairMojibake(v);  // <<< corrige mojibake
     if (v == null || v === '') v = '-';
     return `<tr>
       <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">${k}</th>
@@ -2336,6 +2369,7 @@ function buildPropsTableAll(props = {}) {
   }).join('');
   return `<table style="border-collapse:collapse;width:100%;font-size:.95em;">${rows || '<tr><td>(Sem atributos)</td></tr>'}</table>`;
 }
+
 
 // popup
 function bindLitologiaPopup(feature, layer) {
