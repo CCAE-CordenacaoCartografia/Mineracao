@@ -237,6 +237,13 @@
     // Panes Hidrografia
     map.createPane('pane-hidros-rios');    map.getPane('pane-hidros-rios').style.zIndex = 575;
     map.createPane('pane-hidros-massas');  map.getPane('pane-hidros-massas').style.zIndex = 574;
+
+
+    // Pane Aeródromos (acima das outras camadas vetoriais)
+map.createPane('pane-aerodromos');
+map.getPane('pane-aerodromos').style.zIndex = 700;
+map.getPane('pane-aerodromos').style.pointerEvents = 'auto';
+
 // Pane Ferrovias (acima de todas as outras camadas vetoriais)
 map.createPane('pane-ferrovias');
 map.getPane('pane-ferrovias').style.zIndex = 650; // > mineração (580), hidrografia (574-575), litologia (565) etc.
@@ -906,7 +913,126 @@ try {
     } catch(_){}
   }
 });
+/* ==== AERÓDROMOS: helpers (ícone, tooltip, popup) ==== */
+// === Pane Aeródromos ===
+map.createPane('pane-aerodromos');
+map.getPane('pane-aerodromos').style.zIndex = 800;
+map.getPane('pane-aerodromos').style.pointerEvents = 'auto';
+
+/* === Ícone SVG estilo “outline” (traçado fino, limpo) === */
+function planeSVGOutline(color = "#1e90ff") {
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="28" height="28" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 34l22-8 8-20 8 8-4 12 16 12 8 0-6 6-14-4-10 10-8-8 6-14-12-4z"/>
+  </svg>`;
+}
+
+function makePlaneIcon(color) {
+  return L.divIcon({
+    className: 'plane-icon',
+    html: planeSVGOutline(color),
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -10]
+  });
+}
+
+/* === Tooltip e Popup === */
+function bindAerPopup(feature, layer, tipo) {
+  const props = feature.properties || {};
+  const nome = props.Nome || props.nome || props.AERODROMO || props.aerodromo || "Aeródromo";
+  const tabela = Object.entries(props)
+    .map(([k, v]) => `<tr><th style="text-align:left;padding:4px 6px;">${k}</th><td style="text-align:right;padding:4px 6px;">${v ?? "-"}</td></tr>`)
+    .join('');
+  const html = `
+    <div style="font-weight:bold;margin-bottom:6px;">${tipo} • ${nome}</div>
+    <table style="border-collapse:collapse;width:100%;font-size:.9em;">${tabela}</table>
+    <button id="btnKml-${nome.replace(/\s+/g,'_')}" style="margin-top:8px;padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">
+      Baixar KML
+    </button>
+  `;
+  layer.bindPopup(html);
+  layer.bindTooltip(nome, { direction:'top', opacity:0.9, offset:[0,-10] });
+
+  layer.on('popupopen', () => {
+    const btn = document.querySelector(`#btnKml-${nome.replace(/\s+/g,'_')}`);
+    if (btn) {
+      btn.onclick = () => {
+        const kml = tokml({ type: "FeatureCollection", features: [feature] });
+        const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${nome}.kml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+    }
+  });
+}
+
+/* === Efeito hover === */
+function addHoverEffect(marker) {
+  marker.on('mouseover', () => {
+    marker.setZIndexOffset(1000);
+    const icon = marker._icon;
+    if (icon) {
+      icon.style.transform = 'scale(1.3)';
+      icon.style.filter = 'drop-shadow(0 0 6px rgba(0,0,0,0.5))';
+      icon.style.transition = 'transform 0.2s ease, filter 0.2s ease';
+    }
+  });
+  marker.on('mouseout', () => {
+    marker.setZIndexOffset(0);
+    const icon = marker._icon;
+    if (icon) {
+      icon.style.transform = 'scale(1)';
+      icon.style.filter = '';
+    }
+  });
+}
+
+/* === Camadas === */
+const iconPublico = makePlaneIcon('#1e90ff'); // Azul (públicos)
+const iconPrivado = makePlaneIcon('#ff7f00'); // Laranja (privados)
+
+const aerodromosPublicosLayer = new L.GeoJSON.AJAX('aerodromospublicos.geojson', {
+  pane: 'pane-aerodromos',
+  pointToLayer: (feature, latlng) => {
+    const marker = L.marker(latlng, { icon: iconPublico });
+    addHoverEffect(marker);
+    return marker;
+  },
+  onEachFeature: (feature, layer) => {
+    bindAerPopup(feature, layer, 'Aeródromo Público');
+  }
+}).addTo(map);
+
+const aerodromosPrivadosLayer = new L.GeoJSON.AJAX('aerodromosprivados.geojson', {
+  pane: 'pane-aerodromos',
+  pointToLayer: (feature, latlng) => {
+    const marker = L.marker(latlng, { icon: iconPrivado });
+    addHoverEffect(marker);
+    return marker;
+  },
+  onEachFeature: (feature, layer) => {
+    bindAerPopup(feature, layer, 'Aeródromo Privado');
+  }
+}).addTo(map);
+
+/* === Controle === */
+layersControl.addOverlay(aerodromosPublicosLayer, "Aeródromos públicos");
+layersControl.addOverlay(aerodromosPrivadosLayer, "Aeródromos privados");
+
+
+
+
+
 /* ==== Camadas UCs ==== */
+
+
+
+
 const PATH_UC_FED = 'unidadesdeconservacaofederal.geojson';
 const PATH_UC_EST = 'unidadesdeconservacaoestadual.geojson';
 
@@ -1204,7 +1330,8 @@ function wireLegendEvents(container){
     layersControl.addOverlay(ferroviasLayer, "Ferrovias");
     layersControl.addOverlay(ucFederalLayer,  "UCs Federais");
     layersControl.addOverlay(ucEstadualLayer, "UCs Estaduais");
-
+    layersControl.addOverlay(aerodromosPublicosLayer, "Aeródromos públicos");
+    layersControl.addOverlay(aerodromosPrivadosLayer, "Aeródromos privados");    
 
 
 // === Função de estilo para LITOLOGIA ===
