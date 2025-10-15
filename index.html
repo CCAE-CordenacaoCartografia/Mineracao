@@ -241,6 +241,12 @@
 map.createPane('pane-ferrovias');
 map.getPane('pane-ferrovias').style.zIndex = 650; // > mineração (580), hidrografia (574-575), litologia (565) etc.
 map.getPane('pane-ferrovias').style.pointerEvents = 'auto';
+
+// === Panes UCs ===
+map.createPane('pane-uc-federal');   map.getPane('pane-uc-federal').style.zIndex = 590;
+map.createPane('pane-uc-estadual');  map.getPane('pane-uc-estadual').style.zIndex = 590;
+
+
     // Pane Mineração (acima da hidrografia)
      map.createPane('pane-mineracao');
     map.getPane('pane-mineracao').style.zIndex = 580;
@@ -577,6 +583,111 @@ map.getPane('pane-ferrovias').style.pointerEvents = 'auto';
       return key ? props[key] : fallback;
     }
 
+/* ==== UNIDADES DE CONSERVAÇÃO: helpers ==== */
+function ucGetNome(props = {}){
+  return pickProp(props, ['nome','NOME','Name','NAME','nm_uc','NM_UC','nm','NM']) || 'Unidade de Conservação';
+}
+function ucGetCategoria(props = {}){
+  return pickProp(props, ['categoria','CATEGORIA','categoria_uc','CAT','tipo','TIPO','grupo','GRUPO']) || '-';
+}
+function ucGetAto(props = {}){
+  return pickProp(props, ['ato','ato_criacao','ATO_CRIACAO','ato_criação','ATO','fundamento','FUNDAMENTO']) || '-';
+}
+function ucGetArea(props = {}){
+  // tenta ha, senão tenta m² e converte
+  let ha = pickProp(props, ['area_ha','área_ha','AREA_HA','ha','HA']);
+  if (ha == null){
+    const m2 = pickProp(props, ['area_m2','área_m2','AREA_M2','m2']);
+    if (m2 != null) ha = Number(m2)/10000;
+  }
+  if (ha == null){
+    // tenta km²
+    const km2 = pickProp(props, ['area_km2','área_km2','AREA_KM2','km2','KM2']);
+    if (km2 != null) ha = Number(km2)*100;
+  }
+  if (!Number.isFinite(Number(ha))) return '-';
+  return Number(ha).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function styleUC(feature, isFederal){
+  // tons verdes; federal um pouco mais escuro
+  const fill = isFederal ? '#2e7d32' : '#43a047';
+  return {
+    color: '#1b5e20',
+    weight: 1.5,
+    fillColor: fill,
+    fillOpacity: 0.28,
+    pane: isFederal ? 'pane-uc-federal' : 'pane-uc-estadual'
+  };
+}
+function hoverUCEnter(e){
+  const l=e.target;
+  l.setStyle({ weight:3, fillOpacity:0.5 });
+  try{ l.bringToFront(); }catch(_){}
+}
+function hoverUCLeave(e){
+  const l=e.target;
+  if (l.options && l.options._baseStyle) l.setStyle(l.options._baseStyle);
+}
+
+function bindUCPopup(feature, layer, esfera){
+  const p = feature.properties || {};
+  const nome = ucGetNome(p);
+  const cat  = ucGetCategoria(p);
+  const ato  = ucGetAto(p);
+  const area = ucGetArea(p);
+
+  const rows = [
+    ['Categoria', cat],
+    ['Área (ha)', area],
+    ['Ato de criação', ato]
+  ].map(([k,v])=>`
+    <tr>
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-weight:bold;">${k}</th>
+      <td style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">${v ?? '-'}</td>
+    </tr>`).join('');
+
+  const html = `
+    <div style="font-weight:bold;margin-bottom:6px;">${esfera} • ${nome}</div>
+    <table style="border-collapse:collapse;width:100%;font-size:.95em;">${rows}</table>
+    <div style="margin-top:8px;"><b>Atributos completos</b></div>
+    ${buildPropsTableAll(p)}
+    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+      <button class="uc-kml-btn" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">Baixar KML</button>
+    </div>`;
+
+  layer.bindPopup(html);
+
+  layer.on('popupopen', (e)=>{
+    const el = e.popup.getElement();
+    const btn = el.querySelector('.uc-kml-btn');
+    if (!btn) return;
+    btn.addEventListener('click', ()=>{
+      const nomeArq = (nome || 'UC')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/[^\w\s-]/g,'').replace(/\s+/g,'_');
+
+      let kml = tokml({ type:'FeatureCollection', features:[feature] });
+      const estiloKML = `
+        <Style id="ucStyle">
+          <LineStyle><color>ff1b5e20</color><width>2</width></LineStyle>
+          <PolyStyle><color>8043a047</color><fill>1</fill><outline>1</outline></PolyStyle>
+        </Style>`;
+      kml = kml.replace('</Document>', `${estiloKML}</Document>`)
+               .replace(/<Placemark>/g, '<Placemark><styleUrl>#ucStyle</styleUrl>');
+
+      const blob = new Blob([kml], { type:'application/vnd.google-earth.kml+xml' });
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${nomeArq}.kml`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+  });
+
+  // tooltip leve com o nome
+  try { layer.bindTooltip(nome, { direction:'top', opacity:0.9, sticky:false }); } catch(_){}
+}
+
+
     // Rios (linhas)
     function styleRios(feature){ return { color: COLOR_RIO, weight: 2.8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }; }
     function hoverRio(e){ const l=e.target; l.setStyle({ color:'#01579B', weight:6, opacity:1 }); try{ l.bringToFront(); }catch(_){} }
@@ -764,6 +875,31 @@ try {
       const nome = getFerroNome(feature.properties || {}, 'Ferrovia');
       layer.bindTooltip(nome, { direction:'top', opacity:0.9, sticky:false });
     } catch(_){}
+  }
+});
+/* ==== Camadas UCs ==== */
+const PATH_UC_FED = 'unidadesdeconservacaofederal.geojson';
+const PATH_UC_EST = 'unidadesdeconservacaoestadual.geojson';
+
+// Federais
+const ucFederalLayer = new L.GeoJSON.AJAX(PATH_UC_FED, {
+  pane: 'pane-uc-federal',
+  style: (f)=>{ const st = styleUC(f, true); return st; },
+  onEachFeature: (feature, layer)=>{
+    if (layer.setStyle) layer.options._baseStyle = styleUC(feature, true);
+    bindUCPopup(feature, layer, 'UC Federal');
+    layer.on({ mouseover: hoverUCEnter, mouseout: hoverUCLeave });
+  }
+});
+
+// Estaduais
+const ucEstadualLayer = new L.GeoJSON.AJAX(PATH_UC_EST, {
+  pane: 'pane-uc-estadual',
+  style: (f)=>{ const st = styleUC(f, false); return st; },
+  onEachFeature: (feature, layer)=>{
+    if (layer.setStyle) layer.options._baseStyle = styleUC(feature, false);
+    bindUCPopup(feature, layer, 'UC Estadual');
+    layer.on({ mouseover: hoverUCEnter, mouseout: hoverUCLeave });
   }
 });
 
@@ -1034,6 +1170,8 @@ function wireLegendEvents(container){
     layersControl.addOverlay(riosLayer, "Rios");
     layersControl.addOverlay(massasAguaLayer, "Massas d'água");
     layersControl.addOverlay(ferroviasLayer, "Ferrovias");
+    layersControl.addOverlay(ucFederalLayer,  "UCs Federais");
+    layersControl.addOverlay(ucEstadualLayer, "UCs Estaduais");
 
 
 
