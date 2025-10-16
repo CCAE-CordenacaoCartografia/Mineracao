@@ -1350,10 +1350,113 @@ function wireLegendEvents(container){
 }
 
 
+map.createPane('pane-rodo-fed'); map.getPane('pane-rodo-fed').style.zIndex = 660;
+map.createPane('pane-rodo-est'); map.getPane('pane-rodo-est').style.zIndex = 660;
+map.createPane('pane-rodo-mix'); map.getPane('pane-rodo-mix').style.zIndex = 660;
+
+/* Extrai sigla */
+function getRodoviaSigla(props = {}) {
+  const keys = Object.keys(props);
+  const key = keys.find(k => k.toLowerCase() === 'nm_sigla') ||
+              keys.find(k => k.toLowerCase().includes('sigla'));
+  return props[key] || 'Rodovia';
+}
+
+/* Estilo */
+function styleRodoFed() { return { pane:'pane-rodo-fed', color:'#c62828', weight:4, opacity:1, lineCap:'round' }; }   // vermelho
+function styleRodoEst() { return { pane:'pane-rodo-est', color:'#1565c0', weight:3.5, opacity:1, lineCap:'round' }; } // azul
+function styleRodoMix() { return { pane:'pane-rodo-mix', color:'#6a1b9a', weight:4, opacity:1, lineCap:'round' }; }   // roxo
+
+/* Hover */
+function hoverRodoEnter(e){
+  const l = e.target;
+  l.setStyle({ weight:(l.options._baseStyle?.weight||3)+2, opacity:1 });
+  try{ l.bringToFront(); }catch(_){}
+}
+function hoverRodoLeave(e){
+  const l = e.target;
+  if(l.options && l.options._baseStyle) l.setStyle(l.options._baseStyle);
+}
+
+/* Popup + KML */
+function bindRodoPopup(feature, layer, titulo){
+  const p = feature.properties || {};
+  const sigla = getRodoviaSigla(p);
+  const tabela = Object.entries(p)
+    .map(([k,v])=>`<tr><th style="text-align:left;padding:4px 6px;">${k}</th><td style="text-align:right;padding:4px 6px;">${v??'-'}</td></tr>`)
+    .join('');
+  const html = `
+    <div style="font-weight:bold;margin-bottom:6px;">${titulo} • ${sigla}</div>
+    <table style="border-collapse:collapse;width:100%;font-size:.9em;">${tabela}</table>
+    <button class="rodo-kml-btn" style="margin-top:8px;padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">
+      Baixar KML
+    </button>`;
+  layer.bindPopup(html);
+  layer.bindTooltip(`${titulo} • ${sigla}`, { direction:'top', opacity:0.9, offset:[0,-10] });
+  layer.on('popupopen', e=>{
+    const el = e.popup.getElement();
+    const btn = el.querySelector('.rodo-kml-btn');
+    if(!btn) return;
+    btn.addEventListener('click', ()=>{
+      const nomeArq = (sigla||titulo).replace(/[^\w\s-]/g,'').replace(/\s+/g,'_');
+      let kml = tokml({ type:'FeatureCollection', features:[feature] });
+      const blob = new Blob([kml], { type:'application/vnd.google-earth.kml+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${nomeArq}.kml`;
+      a.click(); URL.revokeObjectURL(url);
+    });
+  });
+}
+
+/* ======= RODOVIAS FEDERAIS ======= */
+try {
+  var rodoviasFederaisLayer = new L.GeoJSON.AJAX('rodoviasfederais.geojson', {
+    pane:'pane-rodo-fed',
+    style:(f)=>{ const st=styleRodoFed(f); return st; },
+    onEachFeature:(feature, layer)=>{
+      layer.options._baseStyle = styleRodoFed(feature);
+      bindRodoPopup(feature, layer, 'Rodovia Federal');
+      layer.on({mouseover:hoverRodoEnter, mouseout:hoverRodoLeave});
+    }
+  });
+  layersControl.addOverlay(rodoviasFederaisLayer, "Rodovias Federais");
+} catch(e) { console.warn("rodoviasfederais.geojson não encontrado"); }
+
+/* ======= RODOVIAS ESTADUAIS ======= */
+try {
+  var rodoviasEstaduaisLayer = new L.GeoJSON.AJAX('rodoviasestaduais.geojson', {
+    pane:'pane-rodo-est',
+    style:(f)=>{ const st=styleRodoEst(f); return st; },
+    onEachFeature:(feature, layer)=>{
+      layer.options._baseStyle = styleRodoEst(feature);
+      bindRodoPopup(feature, layer, 'Rodovia Estadual');
+      layer.on({mouseover:hoverRodoEnter, mouseout:hoverRodoLeave});
+    }
+  });
+  layersControl.addOverlay(rodoviasEstaduaisLayer, "Rodovias Estaduais");
+} catch(e) { console.warn("rodoviasestaduais.geojson não encontrado"); }
+
+/* ======= RODOVIAS FEDERAIS OU ESTADUAIS ======= */
+try {
+  var rodoviasMixLayer = new L.GeoJSON.AJAX('rodoviasfederaisestaduais.geojson', {
+    pane:'pane-rodo-mix',
+    style:(f)=>{ const st=styleRodoMix(f); return st; },
+    onEachFeature:(feature, layer)=>{
+      layer.options._baseStyle = styleRodoMix(feature);
+      bindRodoPopup(feature, layer, 'Rodovia Federal ou Estadual');
+      layer.on({mouseover:hoverRodoEnter, mouseout:hoverRodoLeave});
+    }
+  });
+  layersControl.addOverlay(rodoviasMixLayer, "Rodovias Federais ou Estaduais");
+} catch(e) { console.warn("rodoviasfederaisestaduais.geojson não encontrado"); }
+
+
+
     // Adiciona Hidrografia ao controle
     layersControl.addOverlay(riosLayer, "Rios");
     layersControl.addOverlay(massasAguaLayer, "Massas d'água");
     layersControl.addOverlay(ferroviasLayer, "Ferrovias");
+    
     layersControl.addOverlay(ucFederalLayer,  "UCs Federais");
     layersControl.addOverlay(ucEstadualLayer, "UCs Estaduais");
     layersControl.addOverlay(aerodromosPublicosLayer, "Aeródromos públicos");
