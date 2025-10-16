@@ -205,11 +205,10 @@
 
   <script>
     const map = L.map('map').setView([-7, -42], 7.48);
-// === GARANTIR QUE TODAS AS POPUPS FIQUEM ACIMA DE TUDO ===
-map.createPane('popupPane');
-map.getPane('popupPane').style.zIndex = 9999;  // no topo
-map.getPane('popupPane').style.pointerEvents = 'none';
-L.Popup.prototype.options.pane = 'popupPane';
+/// Pane exclusivo para popups no topo (clicáveis)
+map.createPane('popupTop');
+map.getPane('popupTop').style.zIndex = 10000;  // maior que qualquer outra pane
+map.getPane('popupTop').style.pointerEvents = 'auto';
     // Localização (sem zoom automático)
     let geoMarker = null;
     const myLocIcon = L.divIcon({ className: '', html: '<div class="my-location-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] });
@@ -2732,17 +2731,94 @@ function hoverMinerLeave(e) {
         }
       }
 
-      fetch("biomas.geojson").then(r=>r.json()).then(biomasData=>{
-        const biomasRecortados={ type:"FeatureCollection", features:[] };
-        biomasData.features.forEach(f=>{
-          try{
-            const inter=turf.intersect(f, piauiData.features[0]);
-            if(inter){ inter.properties=f.properties; biomasRecortados.features.push(inter); }
-          }catch(e){ console.warn("Erro ao recortar bioma:", e); }
+   fetch("biomas.geojson").then(r=>r.json()).then(biomasData=>{
+  // Pega o Piauí e “higieniza” a geometria (anéis + coords)
+  const piauiFeat = piauiData.features[0];
+  const piauiClean = turf.cleanCoords(turf.rewind(piauiFeat, { reverse: true }));
+
+  const biomasRecortados = { type:"FeatureCollection", features:[] };
+
+  // função auxiliar: faz intersect robusto (inclui fallback para Multi* e casos nulos)
+  function robustIntersect(srcFeat, clipFeat) {
+    let out = [];
+    try {
+      const f0 = turf.cleanCoords(turf.rewind(srcFeat, { reverse: false }));
+      if (!turf.booleanIntersects(f0, clipFeat)) return out;
+
+      // tenta intersect direto
+      let inter = turf.intersect(f0, clipFeat);
+      if (inter) {
+        // garante que venha como array (às vezes vem Feature, às vezes GeometryCollection)
+        if (inter.type === 'Feature') out.push(inter);
+        else if (inter.type === 'FeatureCollection') out.push(...inter.features);
+        else if (inter.geometry) out.push({ type:'Feature', geometry: inter.geometry, properties:{} });
+      } else {
+        // fallback: intersect por partes (flatten) — pega apenas os pedaços que realmente cruzam
+        turf.flattenEach(f0, (part)=>{
+          try {
+            if (!turf.booleanIntersects(part, clipFeat)) return;
+            const ii = turf.intersect(part, clipFeat);
+            if (ii) {
+              if (ii.type === 'Feature') out.push(ii);
+              else if (ii.type === 'FeatureCollection') out.push(...ii.features);
+              else if (ii.geometry) out.push({ type:'Feature', geometry: ii.geometry, properties:{} });
+            }
+          } catch (_) {}
         });
-        const biomasLayer = L.geoJSON(biomasRecortados,{ pane: 'pane-biomas', style: styleBiomas, onEachFeature: (feature, layer)=>layer.bindPopup(`<b>Bioma:</b> ${feature.properties.Bioma||feature.properties.bioma||"Bioma"}`) });
-        layersControl.addOverlay(biomasLayer, "Biomas");
-      });
+      }
+    } catch (e) {
+      // último fallback bem conservador: corta por bbox se realmente intersecta (evita perder tudo)
+      try {
+        const f0 = turf.cleanCoords(srcFeat);
+        if (turf.booleanIntersects(f0, clipFeat)) {
+          const clipped = turf.bboxClip(f0, turf.bbox(clipFeat));
+          if (clipped) out.push(clipped);
+        }
+      } catch(_) {}
+      console.warn('Intersect falhou para um bioma; usando fallback.', e);
+    }
+    return out;
+  }
+
+  // processa cada bioma preservando as propriedades
+  for (const f of biomasData.features) {
+    const parts = robustIntersect(f, piauiClean);
+    for (const g of parts) {
+      // preserva as props originais (Bioma, CD_Bioma, etc.)
+      g.properties = { ...(g.properties || {}), ...(f.properties || {}) };
+      biomasRecortados.features.push(g);
+    }
+  }
+
+  // estilo
+  function styleBiomas(feature){
+    const bioma = (feature.properties.Bioma || feature.properties.bioma || "").toLowerCase();
+    switch (bioma) {
+      case "amazônia":
+      case "amazonia":      return { color:"#1B5E20", fillColor:"#1B5E20", fillOpacity:0.50, weight:1 };
+      case "caatinga":      return { color:"#E6B800", fillColor:"#E6B800", fillOpacity:0.50, weight:1 };
+      case "cerrado":       return { color:"#4CAF50", fillColor:"#4CAF50", fillOpacity:0.50, weight:1 };
+      case "mata atlântica":
+      case "mata atlantica":return { color:"#00695C", fillColor:"#00695C", fillOpacity:0.50, weight:1 };
+      case "pantanal":      return { color:"#8D6E63", fillColor:"#8D6E63", fillOpacity:0.50, weight:1 };
+      case "pampa":         return { color:"#A1887F", fillColor:"#A1887F", fillOpacity:0.50, weight:1 };
+      default:              return { color:"#9E9E9E", fillColor:"#9E9E9E", fillOpacity:0.50, weight:1 };
+    }
+  }
+
+  const biomasLayer = L.geoJSON(biomasRecortados, {
+    pane: 'pane-biomas',
+    style: styleBiomas,
+    onEachFeature: (feature, layer) => {
+      const nome = feature.properties.Bioma || feature.properties.bioma || "Bioma";
+      layer.bindPopup(`<b>Bioma:</b> ${nome}`);
+    }
+  });
+
+  // adiciona ao controle (como você já fazia)
+  layersControl.addOverlay(biomasLayer, "Biomas");
+});
+
     });
 
     /* ESC limpa seleção e recolhe busca */
