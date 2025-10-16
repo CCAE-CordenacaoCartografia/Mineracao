@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -914,10 +913,7 @@ try {
   }
 });
 /* ==== AERÓDROMOS: helpers (ícone, tooltip, popup) ==== */
-// === Pane Aeródromos ===
-map.createPane('pane-aerodromos');
-map.getPane('pane-aerodromos').style.zIndex = 800;
-map.getPane('pane-aerodromos').style.pointerEvents = 'auto';
+
 /* SVG de avião (vista superior). Troque a cor via parâmetro. */
 function planeSVG(color = "#1e90ff", size = 28) {
   const stroke = "#111";
@@ -1004,7 +1000,7 @@ map.on('zoomend', rescaleAerodromeIcons);
 /* Tooltip + Popup (mantém sua função existente) */
 function bindAerPopup(feature, layer, tipo) {
   const props = feature.properties || {};
-  const nome = props.Nome || props.nome || props.AERODROMO || props.aerodromo || "Aeródromo";
+ const nome = props.NOME || props.Nome || props.nome || props.AERODROMO || props.aerodromo || "Aeródromo";
   const tabela = Object.entries(props)
     .map(([k, v]) => `<tr><th style="text-align:left;padding:4px 6px;">${k}</th><td style="text-align:right;padding:4px 6px;">${v ?? "-"}</td></tr>`)
     .join('');
@@ -1016,7 +1012,12 @@ function bindAerPopup(feature, layer, tipo) {
     </button>
   `;
   layer.bindPopup(html);
-  layer.bindTooltip(nome, { direction:'top', opacity:0.9, offset:[0,-10] });
+ layer.bindTooltip(`${tipo} • ${nome}`, {
+  direction: 'top',
+  opacity: 0.9,
+  offset: [0, -10],
+  permanent: false
+});
 
   layer.on('popupopen', () => {
     const btn = document.querySelector(`#btnKml-${nome.replace(/\s+/g,'_')}`);
@@ -1051,18 +1052,9 @@ const aerodromosPrivadosLayer = new L.GeoJSON.AJAX('aerodromosprivados.geojson',
     bindAerPopup(feature, layer, 'Aeródromo Privado');
   }
 })
-/* Entram no controle de camadas */
-layersControl.addOverlay(aerodromosPublicosLayer, "Aeródromos públicos");
-layersControl.addOverlay(aerodromosPrivadosLayer, "Aeródromos privados");
-
-
 
 
 /* ==== Camadas UCs ==== */
-
-
-
-
 const PATH_UC_FED = 'unidadesdeconservacaofederal.geojson';
 const PATH_UC_EST = 'unidadesdeconservacaoestadual.geojson';
 
@@ -1393,7 +1385,7 @@ const litologiaLayer = new L.GeoJSON.AJAX("litologia.geojson", {
   }
 });
 // não adiciona direto no mapa (inicia DESLIGADA)
-layersControl.addOverlay(litologiaLayer, "Litologia (SIGLAS_UNID)");
+layersControl.addOverlay(litologiaLayer, "Litologia");
 
 
 
