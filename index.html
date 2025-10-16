@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -204,7 +205,11 @@
 
   <script>
     const map = L.map('map').setView([-7, -42], 7.48);
-
+// === GARANTIR QUE TODAS AS POPUPS FIQUEM ACIMA DE TUDO ===
+map.createPane('popupPane');
+map.getPane('popupPane').style.zIndex = 9999;  // no topo
+map.getPane('popupPane').style.pointerEvents = 'none';
+L.Popup.prototype.options.pane = 'popupPane';
     // Localização (sem zoom automático)
     let geoMarker = null;
     const myLocIcon = L.divIcon({ className: '', html: '<div class="my-location-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] });
@@ -1173,7 +1178,7 @@ function buildMinerLegendHTML() {
 
   const header = `
     <div style="font-weight:bold;text-align:center;margin-bottom:6px;">
-      Tipos de Minério
+      Processos Minerários
     </div>
 
     <!-- Filtros -->
