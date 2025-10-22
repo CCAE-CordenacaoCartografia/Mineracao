@@ -116,7 +116,13 @@
     /* Popup dimensões */
     .leaflet-popup-content { max-width: 300px; max-height: 180px; overflow-y: auto; font-size: 13.5px; line-height: 1.3; }
     .leaflet-popup-content-wrapper { padding: 8px; }
-    .leaflet-pane.leaflet-popup-pane { z-index: 5000 !important; }
+    .leaflet-pane.leaflet-popup-pane { z-index: 10000 !important; }
+
+/* NOVO: Ajuste do Z-Index para Tooltips */
+    .leaflet-pane.leaflet-tooltip-pane {
+        z-index: 4500 !important; /* Deve ser maior que pane-aerodromos (700) */
+    }
+
 
     .leaflet-top.leaflet-left { top: 66px; left: var(--gap); display: flex; flex-direction: column; gap: 8px; }
 
@@ -207,7 +213,7 @@
     const map = L.map('map').setView([-7, -42], 7.48);
 /// Pane exclusivo para popups no topo (clicáveis)
 map.createPane('popupTop');
-map.getPane('popupTop').style.zIndex = 10000;  // maior que qualquer outra pane
+map.getPane('popupTop').style.zIndex = 10000;  // Z-Index do Popup (O MAIS ALTO)
 map.getPane('popupTop').style.pointerEvents = 'auto';
     // Localização (sem zoom automático)
     let geoMarker = null;
@@ -244,7 +250,7 @@ map.getPane('popupTop').style.pointerEvents = 'auto';
 
     // Pane Aeródromos (acima das outras camadas vetoriais)
 map.createPane('pane-aerodromos');
-map.getPane('pane-aerodromos').style.zIndex = 700;
+map.getPane('pane-aerodromos').style.zIndex = 700; // Z-Index da Camada
 map.getPane('pane-aerodromos').style.pointerEvents = 'auto';
 
 // Pane Ferrovias (acima de todas as outras camadas vetoriais)
