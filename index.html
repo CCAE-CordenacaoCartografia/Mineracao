@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1466,7 +1467,107 @@ try {
     layersControl.addOverlay(ucFederalLayer,  "UCs Federais");
     layersControl.addOverlay(ucEstadualLayer, "UCs Estaduais");
     layersControl.addOverlay(aerodromosPublicosLayer, "Aeródromos públicos");
-    layersControl.addOverlay(aerodromosPrivadosLayer, "Aeródromos privados");    
+    layersControl.addOverlay(aerodromosPrivadosLayer, "Aeródromos privados");  
+      
+/* === CAMADA PORTOS === */
+map.createPane('pane-portos');
+map.getPane('pane-portos').style.zIndex = 680;
+map.getPane('pane-portos').style.pointerEvents = 'auto';
+
+/* CSS para efeito hover fixo */
+const portoStyle = document.createElement("style");
+portoStyle.innerHTML = `
+  .porto-icon {
+    transition: transform 0.2s ease;
+    transform-origin: center center !important;
+  }
+  .porto-icon:hover {
+    transform: scale(1.3);
+    z-index: 9999 !important;
+  }
+`;
+document.head.appendChild(portoStyle);
+
+function getPortoNome(props = {}) {
+  const keys = Object.keys(props);
+  const key = keys.find(k => ['nome','NOME','porto','Porto','nm_porto'].includes(k));
+  return props[key] || 'Porto';
+}
+
+// Ícone SVG de navio (fixo)
+const navioIcon = L.divIcon({
+  html: `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24">
+      <path fill="#0077be" stroke="#004b6b" stroke-width="2" 
+            d="M32 4l-6 12h12L32 4zm-16 18h32l6 20H10l6-20zm-8 20h48l4 8H4l4-8z"/>
+    </svg>
+  `,
+  className: 'porto-icon',
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+  popupAnchor: [0, -10]
+});
+
+function bindPortoPopup(feature, layer) {
+  const p = feature.properties || {};
+  const nome = getPortoNome(p);
+
+  // HTML da popup
+  const tabela = Object.entries(p)
+    .map(([k,v])=>`<tr><th style="text-align:left;padding:4px 6px;">${k}</th>
+                   <td style="text-align:right;padding:4px 6px;">${v ?? '-'}</td></tr>`)
+    .join('');
+  const html = `
+    <div style="font-weight:bold;margin-bottom:6px;">⚓ Porto — ${nome}</div>
+    <table style="border-collapse:collapse;width:100%;font-size:.9em;">${tabela}</table>
+    <button class="porto-kml-btn" style="margin-top:8px;padding:6px 10px;border:1px solid #ccc;
+            border-radius:6px;background:#fff;cursor:pointer;">Baixar KML</button>
+  `;
+
+  // Tooltip — exibe apenas o nome do porto
+  layer.bindTooltip(`${nome}`, {
+    direction: 'top',
+    opacity: 0.9,
+    offset: [0, -15],
+  });
+
+  // Popup principal
+  layer.bindPopup(html);
+
+  // Botão de download KML
+  layer.on('popupopen', e => {
+    const el = e.popup.getElement();
+    const btn = el.querySelector('.porto-kml-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+      const nomeArq = nome.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+      let kml = tokml({ type: 'FeatureCollection', features: [feature] });
+      const estiloKML = `
+        <Style id="portoStyle">
+          <IconStyle>
+            <Icon><href>http://maps.google.com/mapfiles/kml/shapes/ferry.png</href></Icon>
+          </IconStyle>
+        </Style>`;
+      kml = kml.replace('</Document>', `${estiloKML}</Document>`)
+               .replace(/<Placemark>/g, '<Placemark><styleUrl>#portoStyle</styleUrl>');
+      const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${nomeArq}.kml`;
+      a.click(); URL.revokeObjectURL(url);
+    });
+  });
+}
+
+// Cria a camada GeoJSON
+const portosLayer = new L.GeoJSON.AJAX("portos.geojson", {
+  pane: 'pane-portos',
+  pointToLayer: (feature, latlng) => L.marker(latlng, { icon: navioIcon }),
+  onEachFeature: bindPortoPopup
+});
+
+layersControl.addOverlay(portosLayer, "Portos");
 
 
 // === Função de estilo para LITOLOGIA ===
@@ -2668,9 +2769,6 @@ function bindLitologiaPopup(feature, layer) {
     });
   });
 }
-
-
-
 // efeitos de hover
 function hoverMinerEnter(e) {
   const l = e.target;
@@ -2685,15 +2783,6 @@ function hoverMinerLeave(e) {
   const l = e.target;
   if (l.options && l.options._baseStyle) l.setStyle(l.options._baseStyle);
 }
-
-
-
-
-
-
-
-
-
     /* === Legenda de Territórios === */
     function addLegend() {
       if (!territorioColors.length && territoriosLayer) {
