@@ -183,9 +183,29 @@
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
 }
-
+#ultimaAtualizacao {
+  position: fixed;
+  bottom: 38px; /* fica logo acima dos créditos */
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  color: #333;
+  z-index: 2000;
+  text-align: center;
+}
   </style>
 </head>
+<div id="ultimaAtualizacao"></div>
+<script>
+  const hoje = new Date();
+  const dataFormatada = hoje.toLocaleDateString('pt-BR');
+  document.getElementById('ultimaAtualizacao').textContent =
+    `Última atualização: ${dataFormatada}`;
+</script>
 <body>
   <div id="map"></div>
 
@@ -3132,6 +3152,7 @@ function hoverMinerLeave(e) {
         toggleBtn.classList.remove('attention');
       }
     }
+    
   </script>
 
   <div id="creditosLegenda">
