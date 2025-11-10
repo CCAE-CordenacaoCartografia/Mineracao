@@ -199,13 +199,7 @@
 }
   </style>
 </head>
-<div id="ultimaAtualizacao"></div>
-<script>
-  const hoje = new Date();
-  const dataFormatada = hoje.toLocaleDateString('pt-BR');
-  document.getElementById('ultimaAtualizacao').textContent =
-    `Última atualização: ${dataFormatada}`;
-</script>
+<div id="ultimaAtualizacao">Última atualização: 10/11/2025</div>
 <body>
   <div id="map"></div>
 
@@ -232,6 +226,11 @@
 
   <script>
     const map = L.map('map').setView([-7, -42], 7.48);
+    // Garante que o botão "Selecionar Territórios" comece oculto
+document.addEventListener("DOMContentLoaded", () => {
+  const legendaBtn = document.querySelector('.legend-toggle');
+  if (legendaBtn) legendaBtn.style.display = 'none';
+});
 /// Pane exclusivo para popups no topo (clicáveis)
 map.createPane('popupTop');
 map.getPane('popupTop').style.zIndex = 10000;  // Z-Index do Popup (O MAIS ALTO)
@@ -418,6 +417,14 @@ map.createPane('pane-uc-estadual');  map.getPane('pane-uc-estadual').style.zInde
     }
     let territorioSelecionado = null;
     function onEachTerritorio(feature, layer){
+      // === Tooltip com o nome do território ===
+const nome = feature.properties?.NM_TD || "Território sem nome";
+layer.bindTooltip(nome, {
+  direction: 'top',
+  opacity: 0.9,
+  sticky: false
+});
+
       layer.on({
         mouseover: highlightFeature,
         mouseout: (e)=>territoriosLayer.resetStyle(e.target),
@@ -522,6 +529,28 @@ map.createPane('pane-uc-estadual');  map.getPane('pane-uc-estadual').style.zInde
 
     // Fallback para legenda
     setTimeout(() => { if (!document.querySelector('.legend-toggle')) addLegend(); }, 2000);
+    // 🔧 Garante que o botão "Selecionar Territórios" só apareça com a camada ativa
+setTimeout(() => {
+  const legendaBtn = document.querySelector('.legend-toggle');
+  if (legendaBtn) legendaBtn.style.display = 'none';
+}, 2500);
+
+map.on('overlayadd', function (e) {
+  if (e.name === 'Territórios') {
+    const legendaBtn = document.querySelector('.legend-toggle');
+    if (legendaBtn) legendaBtn.style.display = 'block';
+  }
+});
+
+map.on('overlayremove', function (e) {
+  if (e.name === 'Territórios') {
+    const legendaBtn = document.querySelector('.legend-toggle');
+    const legendaDiv = document.querySelector('.legend');
+    if (legendaBtn) legendaBtn.style.display = 'none';
+    if (legendaDiv) legendaDiv.classList.add('collapsed');
+  }
+});
+
 
     const municipiosLayer = new L.GeoJSON.AJAX("municipios.geojson", {
       pane: 'pane-municipios',
@@ -611,6 +640,23 @@ map.createPane('pane-uc-estadual');  map.getPane('pane-uc-estadual').style.zInde
       "Linha Imperial": linhaImperialLayer
     };
     const layersControl = L.control.layers(baseMaps, overlayMaps, { collapsed:false, position:'topleft' }).addTo(map);
+    // === Mostrar/esconder botão "Selecionar Territórios" da legenda ===
+map.on('overlayadd', function (e) {
+  if (e.name === 'Territórios') {
+    const legendaBtn = document.querySelector('.legend-toggle');
+    if (legendaBtn) legendaBtn.style.display = 'block';
+  }
+});
+
+map.on('overlayremove', function (e) {
+  if (e.name === 'Territórios') {
+    const legendaBtn = document.querySelector('.legend-toggle');
+    const legendaDiv = document.querySelector('.legend');
+    if (legendaBtn) legendaBtn.style.display = 'none';
+    if (legendaDiv) legendaDiv.classList.add('collapsed');
+  }
+});
+
 
     // HIDROGRAFIA
     const COLOR_RIO  = '#00A8F6';
@@ -1288,6 +1334,20 @@ function addMineralLegend() {
     return div;
   };
   minerLegendCtrl.addTo(map);
+  // --- Mostra/esconde a legenda conforme a camada de mineração ---
+map.on('overlayadd', function (e) {
+  if (e.name === 'Mineração' && typeof minerLegendCtrl !== 'undefined') {
+    minerLegendCtrl.addTo(map);
+  }
+});
+
+map.on('overlayremove', function (e) {
+  if (e.name === 'Mineração' && typeof minerLegendCtrl !== 'undefined') {
+    map.removeControl(minerLegendCtrl);
+  }
+});
+
+
 }
 
 // Conecta eventos dos checkboxes e botões Selecionar Tudo/Limpar
